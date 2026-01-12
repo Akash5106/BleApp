@@ -6,6 +6,7 @@ import android.content.Context
 import android.os.ParcelUuid
 import com.facebook.react.bridge.*
 import java.util.*
+import android.util.Log 
 
 class BleAdvertiserModule(
     reactContext: ReactApplicationContext
@@ -26,6 +27,11 @@ class BleAdvertiserModule(
             return
         }
 
+        Log.d(
+            "BLE",
+            "Supports advertising: ${bluetoothAdapter.isMultipleAdvertisementSupported}"
+        )
+        bluetoothAdapter.name = "BleChatNode"
         advertiser = bluetoothAdapter.bluetoothLeAdvertiser
 
         if (advertiser == null) {
@@ -43,7 +49,7 @@ class BleAdvertiserModule(
 
         val data = AdvertiseData.Builder()
             .addServiceUuid(ParcelUuid(uuid))
-            .setIncludeDeviceName(false)
+            .setIncludeDeviceName(true)
             .build()
 
         advertiser?.startAdvertising(settings, data, advertiseCallback)
