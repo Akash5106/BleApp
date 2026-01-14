@@ -19,7 +19,7 @@ class BleAdvertiserModule(
     private var gattServer: BluetoothGattServer? = null
     private val bluetoothManager: BluetoothManager? =
         reactContext.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
-    
+   
     private var advertisingPromise: Promise? = null
 
     companion object {
@@ -53,7 +53,6 @@ class BleAdvertiserModule(
             }
 
             advertisingPromise = promise
-
             setupGattServer()
 
         } catch (e: Exception) {
@@ -101,12 +100,12 @@ class BleAdvertiserModule(
     }
 
     private val gattServerCallback = object : BluetoothGattServerCallback() {
-        
+       
         override fun onServiceAdded(status: Int, service: BluetoothGattService?) {
             super.onServiceAdded(status, service)
-            
+           
             Log.d(TAG, "🔔 onServiceAdded called - status: $status, service UUID: ${service?.uuid}")
-            
+           
             if (status == BluetoothGatt.GATT_SUCCESS && service?.uuid == SERVICE_UUID) {
                 Log.d(TAG, "✅ GATT service added successfully!")
                 startAdvertisingInternal()
@@ -116,7 +115,7 @@ class BleAdvertiserModule(
                 advertisingPromise = null
             }
         }
-        
+       
         override fun onConnectionStateChange(device: BluetoothDevice?, status: Int, newState: Int) {
             super.onConnectionStateChange(device, status, newState)
             when (newState) {
@@ -139,13 +138,13 @@ class BleAdvertiserModule(
             value: ByteArray?
         ) {
             super.onCharacteristicWriteRequest(device, requestId, characteristic, preparedWrite, responseNeeded, offset, value)
-            
+           
             Log.d(TAG, "📝 Write request - char UUID: ${characteristic?.uuid}")
-            
+           
             if (characteristic?.uuid == CHAR_UUID) {
                 val message = value?.let { String(it) } ?: ""
                 Log.d(TAG, "📩 Received message: '$message' from ${device?.address}")
-                
+               
                 sendMessageToReactNative(message, device?.address ?: "Unknown")
 
                 if (responseNeeded) {
@@ -165,7 +164,7 @@ class BleAdvertiserModule(
     private fun startAdvertisingInternal() {
         try {
             Log.d(TAG, "🚀 Starting advertising (internal)...")
-            
+           
             val settings = AdvertiseSettings.Builder()
                 .setAdvertiseMode(AdvertiseSettings.ADVERTISE_MODE_LOW_LATENCY)
                 .setTxPowerLevel(AdvertiseSettings.ADVERTISE_TX_POWER_HIGH)
@@ -200,11 +199,11 @@ class BleAdvertiserModule(
                 putString("message", message)
                 putString("from", deviceAddress)
             }
-            
+           
             reactApplicationContext
                 .getJSModule(com.facebook.react.modules.core.DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
                 ?.emit("onMessageReceived", params)
-            
+           
             Log.d(TAG, "✅ Event sent to React Native")
         } catch (e: Exception) {
             Log.e(TAG, "❌ Failed to send event to RN", e)
