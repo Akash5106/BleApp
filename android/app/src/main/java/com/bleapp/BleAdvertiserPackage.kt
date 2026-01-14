@@ -10,7 +10,10 @@ class BleAdvertiserPackage : ReactPackage {
     override fun createNativeModules(
         reactContext: ReactApplicationContext
     ): List<NativeModule> {
-        return listOf(BleAdvertiserModule(reactContext))
+        return listOf(
+            BleAdvertiserModule(reactContext),
+            BleScannerModule(reactContext)
+        )
     }
 
     override fun createViewManagers(
