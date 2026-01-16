@@ -12,7 +12,6 @@ class BleAdvertiserPackage : ReactPackage {
     ): List<NativeModule> {
         return listOf(
             BleAdvertiserModule(reactContext),
-            BleScannerModule(reactContext)
         )
     }
 

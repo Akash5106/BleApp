@@ -143,9 +143,10 @@ class BleAdvertiserModule(
            
             if (characteristic?.uuid == CHAR_UUID) {
                 val message = value?.let { String(it) } ?: ""
-                Log.d(TAG, "📩 Received message: '$message' from ${device?.address}")
-               
-                sendMessageToReactNative(message, device?.address ?: "Unknown")
+                val deviceName = device?.name ?: device?.address ?: "Unknown"
+                Log.d(TAG, "📩 Received message: '$message' from $deviceName (${device?.address})")
+
+                sendMessageToReactNative(message, deviceName)
 
                 if (responseNeeded) {
                     gattServer?.sendResponse(
@@ -193,11 +194,11 @@ class BleAdvertiserModule(
         }
     }
 
-    private fun sendMessageToReactNative(message: String, deviceAddress: String) {
+    private fun sendMessageToReactNative(message: String, deviceInfo: String) {
         try {
             val params = Arguments.createMap().apply {
                 putString("message", message)
-                putString("from", deviceAddress)
+                putString("from", deviceInfo)
             }
            
             reactApplicationContext

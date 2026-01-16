@@ -28,7 +28,6 @@ export default function BleScreen() {
   const [messages, setMessages] = useState<string[]>([]);
   const [connectedDevice, setConnectedDevice] = useState<Device | null>(null);
 
-  // Listen for received messages
   useEffect(() => {
     const eventEmitter = new NativeEventEmitter(BleAdvertiser);
     const subscription = eventEmitter.addListener(
@@ -186,7 +185,6 @@ export default function BleScreen() {
       await newConnectedDevice.discoverAllServicesAndCharacteristics();
       console.log("✅ Services discovered");
 
-      // Verify service exists
       const services = await newConnectedDevice.services();
       const targetService = services.find((s) => s.uuid.toLowerCase() === SERVICE_UUID.toLowerCase());
 
@@ -251,8 +249,9 @@ export default function BleScreen() {
   };
 
   return (
-    <ScrollView contentContainerStyle={styles.container}>
-      <Text style={styles.title}>BLE Messenger</Text>
+    <View style={styles.container}>
+      <ScrollView contentContainerStyle={styles.scrollContent}>
+        <Text style={styles.title}>BLE Messenger</Text>
 
       {/* Permissions */}
       <View style={styles.buttonRow}>
@@ -304,19 +303,18 @@ export default function BleScreen() {
               {isScanning ? "Searching..." : "No devices found"}
             </Text>
           ) : (
-            <FlatList
-              data={devices}
-              keyExtractor={(item) => item.id}
-              renderItem={({ item }) => (
+            <ScrollView style={{ flex: 1 }} nestedScrollEnabled>
+              {devices.map((item) => (
                 <TouchableOpacity
+                  key={item.id}
                   onPress={() => connectAndSendMessage(item)}
                   style={styles.deviceItem}
                 >
                   <Text style={styles.deviceName}>{item.name}</Text>
                   <Text style={styles.sendText}>Tap to send "Hello"</Text>
                 </TouchableOpacity>
-              )}
-            />
+              ))}
+            </ScrollView>
           )}
         </View>
       </View>
@@ -328,7 +326,7 @@ export default function BleScreen() {
           {messages.length === 0 ? (
             <Text style={styles.placeholder}>No messages yet</Text>
           ) : (
-            <ScrollView>
+            <ScrollView style={{ flex: 1 }} nestedScrollEnabled>
               {messages.map((msg, idx) => (
                 <Text key={idx} style={styles.messageText}>
                   {msg}
@@ -339,15 +337,19 @@ export default function BleScreen() {
         </View>
       </View>
     </ScrollView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
+    flex: 1,
+    backgroundColor: "#fff",
+  },
+  scrollContent: {
     flexGrow: 1,
     paddingHorizontal: 20,
     paddingVertical: 40,
-    backgroundColor: "#fff",
   },
   title: {
     fontSize: 28,
