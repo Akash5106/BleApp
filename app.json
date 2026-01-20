@@ -1,4 +1,7 @@
 {
   "name": "BleApp",
-  "displayName": "BleApp"
+  "displayName": "BleApp",
+  "android": {
+    "package": "com.anonymous.bleapp"
+  }
 }

@@ -1,4 +1,4 @@
-package com.bleapp
+package com.anonymous.bleapp
 
 import android.bluetooth.*
 import android.bluetooth.le.*
@@ -30,36 +30,38 @@ class BleAdvertiserModule(
 
     override fun getName(): String = "BleAdvertiser"
 
-    @ReactMethod
-    fun startAdvertising(promise: Promise) {
-        try {
-            if (bluetoothAdapter == null || !bluetoothAdapter.isEnabled) {
-                promise.reject("BLE", "Bluetooth not enabled")
-                return
-            }
-
-            Log.d(TAG, "✅ Starting BLE advertising setup...")
-            Log.d(TAG, "Bluetooth enabled: ${bluetoothAdapter.isEnabled}")
-            Log.d(TAG, "Supports advertising: ${bluetoothAdapter.isMultipleAdvertisementSupported}")
-
-            bluetoothAdapter.name = "BleChat"
-            Log.d(TAG, "Device name: BleChat")
-
-            advertiser = bluetoothAdapter.bluetoothLeAdvertiser
-
-            if (advertiser == null) {
-                promise.reject("BLE", "Advertising not supported on this device")
-                return
-            }
-
-            advertisingPromise = promise
-            setupGattServer()
-
-        } catch (e: Exception) {
-            Log.e(TAG, "❌ Error in startAdvertising", e)
-            promise.reject("BLE", "Failed to start: ${e.message}")
+  @ReactMethod
+fun startAdvertising(deviceName: String, promise: Promise) {
+    try {
+        if (bluetoothAdapter == null || !bluetoothAdapter.isEnabled) {
+            promise.reject("BLE", "Bluetooth not enabled")
+            return
         }
+
+        // DYNAMIC NAME: Set the phone's name to what you typed in the app
+        if (deviceName.isNotEmpty()) {
+            Log.d(TAG, "Setting device name to: $deviceName")
+            bluetoothAdapter.name = deviceName 
+        }
+
+        advertiser = bluetoothAdapter.bluetoothLeAdvertiser
+        if (advertiser == null) {
+            promise.reject("BLE", "Advertising not supported on this device")
+            return
+        }
+
+        advertisingPromise = promise
+        setupGattServer()
+
+    } catch (e: SecurityException) {
+        // This catch specifically handles the crash you're seeing
+        Log.e(TAG, "❌ Permission Denied: Need BLUETOOTH_CONNECT to set name", e)
+        promise.reject("PERMISSION_ERROR", "Bluetooth Connect permission required to set name.")
+    } catch (e: Exception) {
+        Log.e(TAG, "❌ Error in startAdvertising", e)
+        promise.reject("BLE", "Failed to start: ${e.message}")
     }
+}
 
     private fun setupGattServer() {
         try {
