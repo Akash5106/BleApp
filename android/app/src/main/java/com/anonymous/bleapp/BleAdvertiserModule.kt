@@ -203,7 +203,7 @@ fun startAdvertising(deviceName: String, promise: Promise) {
                 putString("from", deviceInfo)
             }
            
-            reactApplicationContext
+            reactApplicationContext    
                 .getJSModule(com.facebook.react.modules.core.DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
                 ?.emit("onMessageReceived", params)
            
