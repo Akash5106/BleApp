@@ -6,7 +6,6 @@ export const requestBlePermissions = async () => {
   try {
     const apiLevel = parseInt(Platform.Version.toString(), 10);
 
-    // Android 12+ (API 31)
     if (apiLevel >= 31) {
       const result = await PermissionsAndroid.requestMultiple([
         PermissionsAndroid.PERMISSIONS.BLUETOOTH_SCAN,
