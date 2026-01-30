@@ -1,6 +1,6 @@
 // ============================================================================
-// BLE SERVICE
-// Handles Bluetooth Low Energy scanning and packet exchange
+// BLE SERVICE - FINAL COMPLETE VERSION
+// Handles Bluetooth Low Energy scanning, advertising, and packet exchange
 // ============================================================================
 
 import { NativeModules, NativeEventEmitter, Platform } from 'react-native';
@@ -11,6 +11,10 @@ import MeshProtocolService from './MeshProtocolService';
 const BleManagerModule = NativeModules.BleManager;
 const bleManagerEmitter = new NativeEventEmitter(BleManagerModule);
 
+// Get native advertiser module
+const { BleAdvertiser } = NativeModules;
+const bleAdvertiserEmitter = BleAdvertiser ? new NativeEventEmitter(BleAdvertiser) : null;
+
 // Mesh UUIDs
 const MESH_SERVICE_UUID = '0000FFF0-0000-1000-8000-00805F9B34FB';
 const MESH_CHARACTERISTIC_UUID = '0000FFF1-0000-1000-8000-00805F9B34FB';
@@ -19,149 +23,475 @@ class BLEService {
   private isScanning = false;
   private discoveredDevices = new Map<string, BLEDevice>();
   private scanListeners: Array<(devices: BLEDevice[]) => void> = [];
+  private deviceId: string = '';
+  private deviceName: string = '';
 
   // =========================================================================
-  // INIT
+  // INITIALIZATION
   // =========================================================================
   async init(): Promise<void> {
-    await BleManager.start({ showAlert: false });
+    try {
+      console.log('🚀 Initializing BLE Service...');
 
-    if (Platform.OS === 'android') {
-      await BleManager.enableBluetooth();
+      // Start BLE Manager
+      await BleManager.start({ showAlert: false });
+      console.log('✅ BLE Manager started');
+
+      // Enable Bluetooth (Android)
+      if (Platform.OS === 'android') {
+        try {
+          await BleManager.enableBluetooth();
+          console.log('✅ Bluetooth enabled');
+        } catch (error) {
+          console.log('⚠️ Bluetooth already enabled or user denied');
+        }
+      }
+
+      // Setup BLE Manager event listeners
+      this.setupBleManagerListeners();
+
+      // Setup native advertiser event listeners
+      this.setupAdvertiserListeners();
+
+      console.log('✅ BLE Service initialized');
+    } catch (error) {
+      console.error('❌ BLE Service init failed:', error);
+      throw error;
     }
-
-    this.setupEventListeners();
-    console.log('✅ BLE Service initialized');
   }
 
   // =========================================================================
-  // EVENT LISTENERS
+  // ADVERTISING (PERIPHERAL MODE)
   // =========================================================================
-  private setupEventListeners(): void {
+  /**
+   * Start advertising with device name and node ID
+   */
+  async startAdvertising(deviceId: string, deviceName?: string): Promise<void> {
+    try {
+      this.deviceId = deviceId;
+      this.deviceName = deviceName || `Mesh-${deviceId}`;
+
+      console.log('📡 Starting BLE advertising...');
+      console.log('Device ID:', this.deviceId);
+      console.log('Device Name:', this.deviceName);
+
+      if (Platform.OS === 'android' && BleAdvertiser) {
+        // Use native Android module
+        await BleAdvertiser.startAdvertising(this.deviceName, this.deviceId);
+        console.log('✅ Android advertising started');
+      } else if (Platform.OS === 'ios') {
+        // iOS peripheral mode
+        await this.startAdvertisingIOS();
+        console.log('✅ iOS advertising started');
+      } else {
+        console.warn('⚠️ Advertising not available on this platform');
+      }
+    } catch (error) {
+      console.error('❌ Failed to start advertising:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Stop advertising
+   */
+  async stopAdvertising(): Promise<void> {
+    try {
+      if (Platform.OS === 'android' && BleAdvertiser) {
+        await BleAdvertiser.stopAdvertising();
+        console.log('⏹️ Advertising stopped');
+      }
+    } catch (error) {
+      console.error('❌ Failed to stop advertising:', error);
+    }
+  }
+
+  /**
+   * iOS advertising (placeholder)
+   */
+  private async startAdvertisingIOS(): Promise<void> {
+    console.log('📡 [iOS] Peripheral mode not yet implemented');
+    // TODO: Implement iOS CoreBluetooth peripheral mode
+  }
+
+  // =========================================================================
+  // SCANNING (CENTRAL MODE)
+  // =========================================================================
+  /**
+   * Start scanning for nearby devices
+   */
+  // =========================================================================
+// SCANNING (CENTRAL MODE)
+// =========================================================================
+/**
+ * Start scanning for nearby devices
+ */
+async startScan(): Promise<void> {
+  try {
+    if (this.isScanning) {
+      console.log('⚠️ Already scanning');
+      return;
+    }
+
+    console.log('🔍 Starting BLE scan...');
+
+    this.discoveredDevices.clear();
+
+    await BleManager.scan({ serviceUUIDs: [],seconds: 5,allowDuplicates: true,});
+
+
+    this.isScanning = true;
+    console.log('✅ Scan started');
+  } catch (error) {
+    console.error('❌ Failed to start scan:', error);
+    this.isScanning = false;
+    throw error;
+  }
+}
+
+  /**
+   * Stop scanning
+   */
+  async stopScan(): Promise<void> {
+    try {
+      await BleManager.stopScan();
+      this.isScanning = false;
+      console.log('⏹️ Scan stopped');
+    } catch (error) {
+      console.error('❌ Failed to stop scan:', error);
+    }
+  }
+
+  // =========================================================================
+  // EVENT LISTENERS - BLE MANAGER
+  // =========================================================================
+  private setupBleManagerListeners(): void {
+    // Device discovered during scan
     bleManagerEmitter.addListener(
       'BleManagerDiscoverPeripheral',
       this.onDeviceDiscovered.bind(this)
     );
 
+    // Scan stopped
     bleManagerEmitter.addListener('BleManagerStopScan', () => {
       this.isScanning = false;
-      console.log('🔍 Scan stopped');
+      console.log('🔍 Scan completed');
     });
 
+    // Characteristic value updated
     bleManagerEmitter.addListener(
       'BleManagerDidUpdateValueForCharacteristic',
-      ({ value, characteristic }) => {
+      ({ value, characteristic, peripheral }) => {
+        console.log('📩 Characteristic updated:', characteristic, 'from', peripheral);
         if (characteristic === MESH_CHARACTERISTIC_UUID) {
           this.onPacketReceived(value);
         }
       }
     );
+
+    // Device connected
+    bleManagerEmitter.addListener('BleManagerConnectPeripheral', (args) => {
+      console.log('🔗 Connected to:', args.peripheral);
+    });
+
+    // Device disconnected
+    bleManagerEmitter.addListener('BleManagerDisconnectPeripheral', (args) => {
+      console.log('🔌 Disconnected from:', args.peripheral);
+    });
+
+    console.log('✅ BLE Manager listeners registered');
   }
 
   // =========================================================================
-  // SCANNING
+  // EVENT LISTENERS - NATIVE ADVERTISER
   // =========================================================================
-async startScan(): Promise<void> {
-  if (this.isScanning) return;
-  this.discoveredDevices.clear();
-  await BleManager.scan({serviceUUIDs: [],seconds: 5,allowDuplicates: true,});
-  this.isScanning = true;
-  console.log('🔍 Started scanning');
-}
+  private setupAdvertiserListeners(): void {
+    if (!bleAdvertiserEmitter) {
+      console.log('⚠️ Native advertiser module not available');
+      return;
+    }
+
+    // Packet received from native module
+    bleAdvertiserEmitter.addListener('onPacketReceived', (event) => {
+      console.log('📦 Packet received from native:', event.deviceName);
+      try {
+        const packet: MeshPacket = JSON.parse(event.packet);
+        console.log('📥 Packet parsed:', packet.msg_id);
+        MeshProtocolService.onPacketReceived(packet);
+      } catch (error) {
+        console.error('❌ Error parsing packet:', error);
+      }
+    });
+
+    // Connection state changed
+    bleAdvertiserEmitter.addListener('onConnectionChange', (event) => {
+      console.log('🔄 Connection:', event.device, event.connected ? 'connected' : 'disconnected');
+    });
+
+    console.log('✅ Advertiser listeners registered');
+  }
 
   // =========================================================================
   // DEVICE DISCOVERY
   // =========================================================================
   private onDeviceDiscovered(device: any): void {
-    const bleDevice: BLEDevice = {
-      id: device.id,
-      name: device.name ?? 'Unknown',
-      rssi: device.rssi,
-    };
+  const advertisedUUIDs: string[] =
+    device.advertising?.serviceUUIDs ??
+    device.advertising?.serviceUuids ??
+    [];
 
-    this.discoveredDevices.set(device.id, bleDevice);
-    this.notifyScanListeners();
+  const normalizedUUIDs = advertisedUUIDs.map(uuid =>
+    uuid.toLowerCase()
+  );
 
-    // Prototype-only: read packet via GATT
-    this.readPacketFromDevice(device.id);
+  const meshUUID = MESH_SERVICE_UUID.toLowerCase();
+
+  const isMeshDevice =
+    normalizedUUIDs.includes(meshUUID) ||
+    normalizedUUIDs.some(uuid => uuid.endsWith('fff0'));
+
+  if (!isMeshDevice) {
+    return; // ignore non-mesh devices
   }
 
+  const bleDevice: BLEDevice = {
+    id: device.id,
+    name:
+      device.name ||
+      device.advertising?.localName ||
+      'Unknown',
+    rssi: device.rssi,
+  };
+
+  this.discoveredDevices.set(device.id, bleDevice);
+  this.notifyScanListeners();
+}
+
+  /**
+   * Read packet from connected device
+   */
   private async readPacketFromDevice(deviceId: string): Promise<void> {
     try {
+      // Connect to device
       await BleManager.connect(deviceId);
-      await BleManager.retrieveServices(deviceId);
+      console.log('🔗 Connected to', deviceId);
 
+      // Retrieve services
+      await BleManager.retrieveServices(deviceId);
+      console.log('📋 Services retrieved');
+
+      // Read characteristic
       const data = await BleManager.read(
         deviceId,
         MESH_SERVICE_UUID,
         MESH_CHARACTERISTIC_UUID
       );
+      console.log('📖 Data read from device');
 
-      await BleManager.disconnect(deviceId);
+      // Process received data
       this.onPacketReceived(data);
-    } catch (err) {
-      console.warn('⚠️ Read failed:', err);
+
+      // Disconnect
+      await BleManager.disconnect(deviceId);
+      console.log('🔌 Disconnected from', deviceId);
+    } catch (error) {
+      console.warn('⚠️ Read from device failed:', error);
+      // Try to disconnect anyway
+      try {
+        await BleManager.disconnect(deviceId);
+      } catch (e) {
+        // Ignore disconnect errors
+      }
     }
   }
 
   // =========================================================================
-  // PACKETS
+  // PACKET HANDLING
   // =========================================================================
+  /**
+   * Advertise packet to nearby devices
+   */
   async advertisePacket(packet: MeshPacket): Promise<void> {
-    const payload = JSON.stringify(packet);
-    const bytes = this.stringToBytes(payload);
+    try {
+      const payload = JSON.stringify(packet);
+      const bytes = this.stringToBytes(payload);
 
-    if (Platform.OS === 'android') {
-      await this.advertiseAndroid(bytes);
-    } else {
-      await this.advertiseIOS(bytes);
+      console.log('📡 Advertising packet:', packet.msg_id);
+
+      if (Platform.OS === 'android') {
+        await this.advertiseAndroid(bytes);
+      } else {
+        await this.advertiseIOS(bytes);
+      }
+    } catch (error) {
+      console.error('❌ Failed to advertise packet:', error);
     }
-
-    console.log('📡 Advertised:', packet.msg_id);
   }
 
-  private async advertiseAndroid(_: number[]): Promise<void> {
-    // Requires react-native-ble-advertiser
-    console.log('📡 [Android] Advertising (placeholder)');
+  /**
+   * Android packet advertising (placeholder)
+   */
+  private async advertiseAndroid(_bytes: number[]): Promise<void> {
+    console.log('📡 [Android] Packet advertising (requires connected clients)');
+    // In Android, packets are sent via GATT writes when clients connect
+    // This is handled by the native module
   }
 
-  private async advertiseIOS(_: number[]): Promise<void> {
-    console.log('📡 [iOS] Advertising (placeholder)');
+  /**
+   * iOS packet advertising (placeholder)
+   */
+  private async advertiseIOS(_bytes: number[]): Promise<void> {
+    console.log('📡 [iOS] Packet advertising (not yet implemented)');
+    // TODO: Implement iOS packet broadcasting
   }
 
+  /**
+   * Handle received packet
+   */
   private onPacketReceived(data: number[]): void {
     try {
-      const packet = JSON.parse(this.bytesToString(data)) as MeshPacket;
+      const packetString = this.bytesToString(data);
+      const packet: MeshPacket = JSON.parse(packetString);
+      
+      console.log('📥 Packet received:', packet.msg_id);
+      console.log('From:', packet.src_id, 'To:', packet.dest_id);
+
+      // Pass to mesh protocol for routing
       MeshProtocolService.onPacketReceived(packet);
-    } catch {
-      console.error('❌ Invalid mesh packet');
+    } catch (error) {
+      console.error('❌ Invalid mesh packet:', error);
+    }
+  }
+
+  // =========================================================================
+  // CONNECTION MANAGEMENT
+  // =========================================================================
+  /**
+   * Connect to a device
+   */
+  async connectToDevice(deviceId: string): Promise<void> {
+    try {
+      console.log('🔗 Connecting to:', deviceId);
+      await BleManager.connect(deviceId);
+      console.log('✅ Connected');
+
+      // Retrieve services
+      await BleManager.retrieveServices(deviceId);
+      console.log('✅ Services retrieved');
+    } catch (error) {
+      console.error('❌ Connection failed:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Disconnect from a device
+   */
+  async disconnectFromDevice(deviceId: string): Promise<void> {
+    try {
+      await BleManager.disconnect(deviceId);
+      console.log('🔌 Disconnected from:', deviceId);
+    } catch (error) {
+      console.error('❌ Disconnect failed:', error);
+    }
+  }
+
+  /**
+   * Write packet to connected device
+   */
+  async writePacketToDevice(deviceId: string, packet: MeshPacket): Promise<void> {
+    try {
+      const packetJson = JSON.stringify(packet);
+      const bytes = this.stringToBytes(packetJson);
+
+      console.log('✍️ Writing packet to:', deviceId);
+
+      await BleManager.write(
+        deviceId,
+        MESH_SERVICE_UUID,
+        MESH_CHARACTERISTIC_UUID,
+        bytes
+      );
+
+      console.log('✅ Packet written successfully');
+    } catch (error) {
+      console.error('❌ Write failed:', error);
+      throw error;
     }
   }
 
   // =========================================================================
   // HELPERS
   // =========================================================================
+  /**
+   * Convert string to byte array
+   */
   private stringToBytes(str: string): number[] {
-    return Array.from(str).map(c => c.charCodeAt(0));
+    const bytes: number[] = [];
+    for (let i = 0; i < str.length; i++) {
+      bytes.push(str.charCodeAt(i));
+    }
+    return bytes;
   }
 
+  /**
+   * Convert byte array to string
+   */
   private bytesToString(bytes: number[]): string {
     return String.fromCharCode(...bytes);
+  }
+
+  /**
+   * Check if Bluetooth is enabled
+   */
+  async isBluetoothEnabled(): Promise<boolean> {
+    try {
+      const state = await BleManager.checkState();
+      return state === 'on';
+    } catch (error) {
+      console.error('❌ Failed to check Bluetooth state:', error);
+      return false;
+    }
+  }
+
+  /**
+   * Get connected devices
+   */
+  async getConnectedDevices(): Promise<any[]> {
+    try {
+      return await BleManager.getConnectedPeripherals([]);
+    } catch (error) {
+      console.error('❌ Failed to get connected devices:', error);
+      return [];
+    }
   }
 
   // =========================================================================
   // SUBSCRIPTIONS
   // =========================================================================
-  onScanUpdate(cb: (devices: BLEDevice[]) => void): () => void {
-    this.scanListeners.push(cb);
+  /**
+   * Subscribe to scan updates
+   */
+  onScanUpdate(callback: (devices: BLEDevice[]) => void): () => void {
+    this.scanListeners.push(callback);
     return () => {
-      this.scanListeners = this.scanListeners.filter(x => x !== cb);
+      this.scanListeners = this.scanListeners.filter(cb => cb !== callback);
     };
   }
 
+  /**
+   * Notify all scan listeners
+   */
   private notifyScanListeners(): void {
     const devices = Array.from(this.discoveredDevices.values());
-    this.scanListeners.forEach(cb => cb(devices));
+    this.scanListeners.forEach(callback => callback(devices));
+  }
+
+  /**
+   * Get discovered devices
+   */
+  getDiscoveredDevices(): BLEDevice[] {
+    return Array.from(this.discoveredDevices.values());
   }
 }
 

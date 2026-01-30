@@ -5,7 +5,8 @@
 // ============================================================================
 
 import React, { useState, useEffect, useRef } from 'react';
-import{  View,
+import {
+  View,
   Text,
   TextInput,
   FlatList,
@@ -15,6 +16,7 @@ import{  View,
   Platform,
   SafeAreaView,
 } from 'react-native';
+
 import { MessageItem } from '../components/MessageItem';
 import { Loading } from '../components/Loading';
 import { EmptyState } from '../components/EmptyState';
@@ -23,27 +25,33 @@ import DatabaseService from '../database/DatabaseService';
 import { StoredMessage } from '../types';
 import { COLORS } from '../constant';
 
+// =======================
+// Props (NO navigation)
+// =======================
 interface ChatScreenProps {
   peerId: string;
-  destName: string;
-  navigation: any; // Keep this so you can use navigation.goBack()
+  peerName: string;
+  onBack: () => void;
 }
 
-export const ChatScreen: React.FC<ChatScreenProps> = ({ peerId,destName,navigation }) => {
-  const peerName=destName;
+export const ChatScreen: React.FC<ChatScreenProps> = ({
+  peerId,
+  peerName,
+  onBack,
+}) => {
   const { sendChatMessage } = useMeshProtocol();
-  
+
   const [messages, setMessages] = useState<StoredMessage[]>([]);
   const [inputText, setInputText] = useState('');
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
-  
-  const flatListRef = useRef<FlatList>(null);
 
+  const flatListRef = useRef<FlatList<StoredMessage>>(null);
+
+  // =======================
+  // Load messages
+  // =======================
   useEffect(() => {
-    navigation.setOptions({
-      title: peerName || peerId,
-    });
     loadMessages();
   }, [peerId]);
 
@@ -66,6 +74,9 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({ peerId,destName,navigati
     }
   };
 
+  // =======================
+  // Send message
+  // =======================
   const handleSend = async () => {
     if (!inputText.trim() || sending) return;
 
@@ -79,15 +90,18 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({ peerId,destName,navigati
       scrollToBottom();
     } catch (error) {
       console.error('❌ Failed to send message:', error);
-      setInputText(messageText); // Restore text on error
+      setInputText(messageText);
     } finally {
       setSending(false);
     }
   };
 
+  // =======================
+  // Render message
+  // =======================
   const renderMessage = ({ item }: { item: StoredMessage }) => {
     const isMyMessage = item.src_id !== peerId;
-    
+
     return (
       <MessageItem
         message={item.payload}
@@ -105,6 +119,17 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({ peerId,destName,navigati
 
   return (
     <SafeAreaView style={styles.container}>
+      {/* ================= HEADER ================= */}
+      <View style={styles.header}>
+        <TouchableOpacity onPress={onBack} style={styles.backButton}>
+          <Text style={styles.backText}>⬅</Text>
+        </TouchableOpacity>
+        <Text style={styles.headerTitle}>
+          {peerName || peerId}
+        </Text>
+      </View>
+
+      {/* ================= BODY ================= */}
       <KeyboardAvoidingView
         style={styles.container}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
@@ -128,6 +153,7 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({ peerId,destName,navigati
           />
         )}
 
+        {/* ================= INPUT ================= */}
         <View style={styles.inputContainer}>
           <TextInput
             style={styles.input}
@@ -139,10 +165,11 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({ peerId,destName,navigati
             maxLength={500}
             editable={!sending}
           />
+
           <TouchableOpacity
             style={[
               styles.sendButton,
-              (!inputText.trim() || sending) && styles.sendButtonDisabled
+              (!inputText.trim() || sending) && styles.sendButtonDisabled,
             ]}
             onPress={handleSend}
             disabled={!inputText.trim() || sending}
@@ -157,10 +184,31 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({ peerId,destName,navigati
   );
 };
 
+// =======================
+// Styles
+// =======================
 const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: COLORS.background,
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 12,
+    backgroundColor: COLORS.primary,
+  },
+  backButton: {
+    paddingRight: 12,
+  },
+  backText: {
+    fontSize: 20,
+    color: COLORS.surface,
+  },
+  headerTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: COLORS.surface,
   },
   messageList: {
     padding: 16,

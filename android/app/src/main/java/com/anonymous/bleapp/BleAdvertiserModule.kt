@@ -17,9 +17,12 @@ class BleAdvertiserModule(
 
     private var advertiser: BluetoothLeAdvertiser? = null
     private var gattServer: BluetoothGattServer? = null
+    private var localDeviceId: String? = null
+    private var localDeviceName: String? = null
+
     private val bluetoothManager: BluetoothManager? =
         reactContext.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
-   
+
     private var advertisingPromise: Promise? = null
 
     companion object {
@@ -30,38 +33,36 @@ class BleAdvertiserModule(
 
     override fun getName(): String = "BleAdvertiser"
 
-  @ReactMethod
-fun startAdvertising(deviceName: String, promise: Promise) {
-    try {
-        if (bluetoothAdapter == null || !bluetoothAdapter.isEnabled) {
-            promise.reject("BLE", "Bluetooth not enabled")
-            return
+    @ReactMethod
+    fun startAdvertising(deviceName: String, deviceId: String, promise: Promise) {
+        try {
+            localDeviceName = deviceName
+            localDeviceId = deviceId
+
+            if (bluetoothAdapter == null || !bluetoothAdapter.isEnabled) {
+                promise.reject("BLE", "Bluetooth not enabled")
+                return
+            }
+
+            if (deviceName.isNotEmpty()) {
+                bluetoothAdapter.name = deviceName
+            }
+
+            advertiser = bluetoothAdapter.bluetoothLeAdvertiser
+            if (advertiser == null) {
+                promise.reject("BLE", "Advertising not supported")
+                return
+            }
+
+            advertisingPromise = promise
+            setupGattServer()
+
+        } catch (e: SecurityException) {
+            promise.reject("PERMISSION_ERROR", "BLUETOOTH_CONNECT required")
+        } catch (e: Exception) {
+            promise.reject("BLE", e.message)
         }
-
-        // DYNAMIC NAME: Set the phone's name to what you typed in the app
-        if (deviceName.isNotEmpty()) {
-            Log.d(TAG, "Setting device name to: $deviceName")
-            bluetoothAdapter.name = deviceName 
-        }
-
-        advertiser = bluetoothAdapter.bluetoothLeAdvertiser
-        if (advertiser == null) {
-            promise.reject("BLE", "Advertising not supported on this device")
-            return
-        }
-
-        advertisingPromise = promise
-        setupGattServer()
-
-    } catch (e: SecurityException) {
-        // This catch specifically handles the crash you're seeing
-        Log.e(TAG, "❌ Permission Denied: Need BLUETOOTH_CONNECT to set name", e)
-        promise.reject("PERMISSION_ERROR", "Bluetooth Connect permission required to set name.")
-    } catch (e: Exception) {
-        Log.e(TAG, "❌ Error in startAdvertising", e)
-        promise.reject("BLE", "Failed to start: ${e.message}")
     }
-}
 
     private fun setupGattServer() {
         try {
@@ -69,7 +70,10 @@ fun startAdvertising(deviceName: String, promise: Promise) {
             gattServer = null
 
             Log.d(TAG, "📡 Opening GATT server...")
-            gattServer = bluetoothManager?.openGattServer(reactApplicationContext, gattServerCallback)
+            gattServer = bluetoothManager?.openGattServer(
+                reactApplicationContext,
+                gattServerCallback
+            )
 
             if (gattServer == null) {
                 Log.e(TAG, "❌ Failed to open GATT server")
@@ -91,8 +95,7 @@ fun startAdvertising(deviceName: String, promise: Promise) {
             service.addCharacteristic(characteristic)
 
             Log.d(TAG, "➕ Adding GATT service...")
-            val result = gattServer?.addService(service)
-            Log.d(TAG, "Add service result: $result")
+            gattServer?.addService(service)
 
         } catch (e: Exception) {
             Log.e(TAG, "❌ Error setting up GATT server", e)
@@ -102,31 +105,20 @@ fun startAdvertising(deviceName: String, promise: Promise) {
     }
 
     private val gattServerCallback = object : BluetoothGattServerCallback() {
-       
+
         override fun onServiceAdded(status: Int, service: BluetoothGattService?) {
             super.onServiceAdded(status, service)
-           
-            Log.d(TAG, "🔔 onServiceAdded called - status: $status, service UUID: ${service?.uuid}")
-           
+
+            Log.d(TAG, "🔔 onServiceAdded - status: $status, UUID: ${service?.uuid}")
+
             if (status == BluetoothGatt.GATT_SUCCESS && service?.uuid == SERVICE_UUID) {
-                Log.d(TAG, "✅ GATT service added successfully!")
                 startAdvertisingInternal()
             } else {
-                Log.e(TAG, "❌ Service add failed - status: $status")
-                advertisingPromise?.reject("BLE", "Service add failed with status: $status")
+                advertisingPromise?.reject(
+                    "BLE",
+                    "Service add failed with status: $status"
+                )
                 advertisingPromise = null
-            }
-        }
-       
-        override fun onConnectionStateChange(device: BluetoothDevice?, status: Int, newState: Int) {
-            super.onConnectionStateChange(device, status, newState)
-            when (newState) {
-                BluetoothProfile.STATE_CONNECTED -> {
-                    Log.d(TAG, "📱 Device connected: ${device?.address}")
-                }
-                BluetoothProfile.STATE_DISCONNECTED -> {
-                    Log.d(TAG, "📱 Device disconnected: ${device?.address}")
-                }
             }
         }
 
@@ -139,16 +131,18 @@ fun startAdvertising(deviceName: String, promise: Promise) {
             offset: Int,
             value: ByteArray?
         ) {
-            super.onCharacteristicWriteRequest(device, requestId, characteristic, preparedWrite, responseNeeded, offset, value)
-           
-            Log.d(TAG, "📝 Write request - char UUID: ${characteristic?.uuid}")
-           
             if (characteristic?.uuid == CHAR_UUID) {
-                val message = value?.let { String(it) } ?: ""
-                val deviceName = device?.name ?: device?.address ?: "Unknown"
-                Log.d(TAG, "📩 Received message: '$message' from $deviceName (${device?.address})")
 
-                sendMessageToReactNative(message, deviceName)
+                val message = value?.let { String(it) } ?: ""
+                val senderId = localDeviceId ?: device?.address ?: "unknown"
+                val displayName = localDeviceName ?: "Unknown"
+
+                Log.d(
+                    TAG,
+                    "📩 Received message: '$message' from $displayName (${device?.address})"
+                )
+
+                sendMessageToReactNative(message, displayName)
 
                 if (responseNeeded) {
                     gattServer?.sendResponse(
@@ -158,7 +152,6 @@ fun startAdvertising(deviceName: String, promise: Promise) {
                         0,
                         null
                     )
-                    Log.d(TAG, "✅ Response sent")
                 }
             }
         }
@@ -166,8 +159,6 @@ fun startAdvertising(deviceName: String, promise: Promise) {
 
     private fun startAdvertisingInternal() {
         try {
-            Log.d(TAG, "🚀 Starting advertising (internal)...")
-           
             val settings = AdvertiseSettings.Builder()
                 .setAdvertiseMode(AdvertiseSettings.ADVERTISE_MODE_LOW_LATENCY)
                 .setTxPowerLevel(AdvertiseSettings.ADVERTISE_TX_POWER_HIGH)
@@ -175,89 +166,68 @@ fun startAdvertising(deviceName: String, promise: Promise) {
                 .setTimeout(0)
                 .build()
 
-            // Minimal data - just service UUID
             val data = AdvertiseData.Builder()
                 .addServiceUuid(ParcelUuid(SERVICE_UUID))
                 .setIncludeDeviceName(false)
-                .setIncludeTxPowerLevel(false)
                 .build()
 
-            // Device name in scan response
             val scanResponse = AdvertiseData.Builder()
                 .setIncludeDeviceName(true)
                 .build()
 
-            advertiser?.startAdvertising(settings, data, scanResponse, advertiseCallback)
+            advertiser?.startAdvertising(
+                settings,
+                data,
+                scanResponse,
+                advertiseCallback
+            )
 
         } catch (e: Exception) {
-            Log.e(TAG, "❌ Error starting advertising", e)
-            advertisingPromise?.reject("BLE", "Advertising start failed: ${e.message}")
+            advertisingPromise?.reject(
+                "BLE",
+                "Advertising start failed: ${e.message}"
+            )
             advertisingPromise = null
         }
     }
 
     private fun sendMessageToReactNative(message: String, deviceInfo: String) {
-        try {
-            val params = Arguments.createMap().apply {
-                putString("message", message)
-                putString("from", deviceInfo)
-            }
-           
-            reactApplicationContext    
-                .getJSModule(com.facebook.react.modules.core.DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
-                ?.emit("onMessageReceived", params)
-           
-            Log.d(TAG, "✅ Event sent to React Native")
-        } catch (e: Exception) {
-            Log.e(TAG, "❌ Failed to send event to RN", e)
+        val params = Arguments.createMap().apply {
+            putString("message", message)
+            putString("from", deviceInfo)
         }
+
+        reactApplicationContext
+            .getJSModule(
+                com.facebook.react.modules.core.DeviceEventManagerModule
+                    .RCTDeviceEventEmitter::class.java
+            )
+            .emit("onMessageReceived", params)
     }
 
     @ReactMethod
     fun stopAdvertising(promise: Promise) {
-        try {
-            advertiser?.stopAdvertising(advertiseCallback)
-            gattServer?.close()
-            gattServer = null
-            Log.d(TAG, "⏹️ Advertising stopped")
-            promise.resolve("Advertising stopped")
-        } catch (e: Exception) {
-            Log.e(TAG, "Error stopping", e)
-            promise.reject("BLE", "Stop failed: ${e.message}")
-        }
+        advertiser?.stopAdvertising(advertiseCallback)
+        gattServer?.close()
+        gattServer = null
+        promise.resolve("Advertising stopped")
     }
 
     private val advertiseCallback = object : AdvertiseCallback() {
         override fun onStartFailure(errorCode: Int) {
-            val error = when (errorCode) {
-                ADVERTISE_FAILED_DATA_TOO_LARGE -> "Data too large"
-                ADVERTISE_FAILED_TOO_MANY_ADVERTISERS -> "Too many advertisers"
-                ADVERTISE_FAILED_ALREADY_STARTED -> "Already started"
-                ADVERTISE_FAILED_INTERNAL_ERROR -> "Internal error"
-                ADVERTISE_FAILED_FEATURE_UNSUPPORTED -> "Feature unsupported"
-                else -> "Unknown error: $errorCode"
-            }
-            Log.e(TAG, "❌ Advertise failed: $error (code: $errorCode)")
-            advertisingPromise?.reject("BLE", "Advertising failed: $error")
+            advertisingPromise?.reject("BLE", "Advertising failed: $errorCode")
             advertisingPromise = null
         }
 
         override fun onStartSuccess(settingsInEffect: AdvertiseSettings) {
-            Log.d(TAG, "✅✅✅ ADVERTISING STARTED SUCCESSFULLY! ✅✅✅")
-            Log.d(TAG, "Connectable: ${settingsInEffect.isConnectable}")
-            Log.d(TAG, "Mode: ${settingsInEffect.mode}")
-            advertisingPromise?.resolve("Advertising started successfully")
+            advertisingPromise?.resolve("Advertising started")
             advertisingPromise = null
         }
     }
 
     @ReactMethod
-    fun addListener(eventName: String) {
-        Log.d(TAG, "Listener added: $eventName")
-    }
+    fun addListener(eventName: String) {}
 
     @ReactMethod
-    fun removeListeners(count: Int) {
-        Log.d(TAG, "Removed $count listeners")
-    }
+    fun removeListeners(count: Int) {}
 }

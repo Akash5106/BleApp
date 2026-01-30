@@ -24,10 +24,9 @@ import { COLORS } from '../constant';
 
 interface NearbyPeersScreenProps {
   onSelectPeer: (peerId: string, peerName: string)=>void;
-  navigation: any;
 }
 
-export const NearbyPeersScreen: React.FC<NearbyPeersScreenProps> = ({ navigation,onSelectPeer }) => {
+export const NearbyPeersScreen: React.FC<NearbyPeersScreenProps> = ({onSelectPeer }) => {
   const { neighbors, getActiveNeighbors } = useMeshProtocol();
   const { granted, bluetoothEnabled, requestPermissions, enableBluetooth } = useBlePermissions();
   
@@ -61,10 +60,6 @@ export const NearbyPeersScreen: React.FC<NearbyPeersScreenProps> = ({ navigation
 
   const handlePeerPress = (peerId: string, peerName?: string) => {
     onSelectPeer(peerId, peerName || peerId);
-    navigation.navigate('Chat', {
-      peerId,
-      peerName: peerName || peerId,
-    });
   };
 
   const handleEnableBluetooth = async () => {
