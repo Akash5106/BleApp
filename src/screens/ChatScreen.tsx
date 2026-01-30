@@ -24,17 +24,13 @@ import { StoredMessage } from '../types';
 import { COLORS } from '../constant';
 
 interface ChatScreenProps {
-  route: {
-    params: {
-      peerId: string;
-      peerName?: string;
-    };
-  };
-  navigation: any;
+  peerId: string;
+  destName: string;
+  navigation: any; // Keep this so you can use navigation.goBack()
 }
 
-export const ChatScreen: React.FC<ChatScreenProps> = ({ route, navigation }) => {
-  const { peerId, peerName } = route.params;
+export const ChatScreen: React.FC<ChatScreenProps> = ({ peerId,destName,navigation }) => {
+  const peerName=destName;
   const { sendChatMessage } = useMeshProtocol();
   
   const [messages, setMessages] = useState<StoredMessage[]>([]);

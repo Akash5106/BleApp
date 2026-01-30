@@ -166,15 +166,20 @@ const App: React.FC = () => {
 
     switch (currentScreen) {
       case 'peers':
-        return <NearbyPeersScreen onSelectPeer={handleSelectPeer} />;
+        return (
+        <NearbyPeersScreen 
+        onSelectPeer={handleSelectPeer} 
+        navigation={{ navigate: () => setCurrentScreen('chat') }} // Pass a mock object
+        />
+      );
       case 'chat':
         return chatInfo ? (
-          <ChatScreen destId={chatInfo.destId} destName={chatInfo.destName} />
-        ) : null;
-      case 'broadcast':
-        return <BroadcastScreen />;
-      default:
-        return null;
+        <ChatScreen 
+        peerId={chatInfo.destId} 
+        destName={chatInfo.destName} 
+        navigation={{ goBack: () => setCurrentScreen('peers') }} // Pass mock goBack
+        />
+      ) : null;
     }
   };
 
