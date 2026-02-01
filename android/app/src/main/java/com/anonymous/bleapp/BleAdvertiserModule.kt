@@ -27,8 +27,8 @@ class BleAdvertiserModule(
 
     companion object {
         private const val TAG = "BleAdvertiser"
-        val SERVICE_UUID: UUID = UUID.fromString("12345678-1234-1234-1234-123456789abc")
-        val CHAR_UUID: UUID = UUID.fromString("87654321-4321-4321-4321-cba987654321")
+        val SERVICE_UUID: UUID = UUID.fromString("0000FFF0-0000-1000-8000-00805F9B34FB")
+        val CHAR_UUID: UUID = UUID.fromString("0000FFF1-0000-1000-8000-00805F9B34FB")
     }
 
     override fun getName(): String = "BleAdvertiser"

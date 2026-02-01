@@ -126,26 +126,39 @@ class BLEService {
 /**
  * Start scanning for nearby devices
  */
+
 async startScan(): Promise<void> {
   try {
-    if (this.isScanning) {
-      console.log('⚠️ Already scanning');
-      return;
+    if (this.isScanning) return;
+
+    // STEP 1: Check Bluetooth State before doing anything
+    const isEnabled = await this.isBluetoothEnabled();
+    if (!isEnabled) {
+      console.warn('📡 Bluetooth is not enabled. Aborting scan.');
     }
 
-    console.log('🔍 Starting BLE scan...');
-
-    this.discoveredDevices.clear();
-
-    await BleManager.scan({ serviceUUIDs: [],seconds: 5,allowDuplicates: true,});
-
+    // STEP 2: Stop Native Advertising and WAIT for it to actually release the radio
+    if (Platform.OS === 'android' && BleAdvertiser) {
+      await BleAdvertiser.stopAdvertising();
+      // Added a small 200ms sleep to let the hardware stabilize
+      await new Promise<void>((resolve) => setTimeout(resolve, 200));
+    }
 
     this.isScanning = true;
-    console.log('✅ Scan started');
+    this.discoveredDevices.clear();
+
+    // STEP 3: Scan specifically for our Service UUID
+    // Ensure MESH_SERVICE_UUID is exactly '0000FFF0-0000-1000-8000-00805F9B34FB'
+    await BleManager.scan({serviceUUIDs:[MESH_SERVICE_UUID], seconds:5, allowDuplicates:true});
+
+    // STEP 4: Automatically restart advertising after the 5s scan period
+    setTimeout(async () => {
+      await this.startAdvertising(this.deviceId, this.deviceName);
+    }, 5100);
+
   } catch (error) {
-    console.error('❌ Failed to start scan:', error);
+    console.error('❌ Root Scan Error:', error);
     this.isScanning = false;
-    throw error;
   }
 }
 
