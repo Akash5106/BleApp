@@ -7,6 +7,7 @@
 import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import { MessageState } from '../types';
+import { COLORS } from '../constants';
 
 interface MessageItemProps {
   message: string;
@@ -21,58 +22,81 @@ export const MessageItem: React.FC<MessageItemProps> = ({
   senderId,
   timestamp,
   isOwnMessage,
-  status = 'DELIVERED',
+  status = MessageState.CONFIRMED,
 }) => {
+  const displaySender =
+    senderId.length > 8 ? senderId.slice(0, 8) + '…' : senderId;
+
   const getStatusIcon = (): string => {
     switch (status) {
-      case 'SENDING':
+      case MessageState.SENDING:
         return '⏳';
-      case 'SENT':
+      case MessageState.MAYBE:
         return '✓';
-      case 'DELIVERED':
+      case MessageState.CONFIRMED:
         return '✓✓';
-      case 'FAILED':
+      case MessageState.FAILED:
         return '❌';
       default:
         return '';
     }
   };
 
-  const formatTime = (timestamp: number): string => {
-    const date = new Date(timestamp);
-    return date.toLocaleTimeString('en-US', { 
-      hour: '2-digit', 
-      minute: '2-digit' 
-    });
-  };
+  const formattedTime = React.useMemo(
+    () =>
+      new Date(timestamp).toLocaleTimeString('en-US', {
+        hour: '2-digit',
+        minute: '2-digit',
+      }),
+    [timestamp]
+  );
 
   return (
-    <View style={[
-      styles.container,
-      isOwnMessage ? styles.ownMessageContainer : styles.otherMessageContainer
-    ]}>
-      <View style={[
-        styles.bubble,
-        isOwnMessage ? styles.ownBubble : styles.otherBubble
-      ]}>
+    <View
+      style={[
+        styles.container,
+        isOwnMessage ? styles.ownMessageContainer : styles.otherMessageContainer,
+      ]}
+      accessible
+      accessibilityLabel={
+        isOwnMessage
+          ? `You: ${message}`
+          : `${displaySender}: ${message}`
+      }
+    >
+      <View
+        style={[
+          styles.bubble,
+          isOwnMessage ? styles.ownBubble : styles.otherBubble,
+        ]}
+      >
         {!isOwnMessage && (
-          <Text style={styles.senderName}>{senderId}</Text>
+          <Text style={styles.senderName}>{displaySender}</Text>
         )}
-        
-        <Text style={[
-          styles.messageText,
-          isOwnMessage ? styles.ownMessageText : styles.otherMessageText
-        ]}>
+
+        <Text
+          style={[
+            styles.messageText,
+            isOwnMessage
+              ? styles.ownMessageText
+              : styles.otherMessageText,
+          ]}
+        >
           {message}
         </Text>
-        
+
         <View style={styles.footer}>
-          <Text style={[
-            styles.timestamp,
-            isOwnMessage ? styles.ownTimestamp : styles.otherTimestamp
-          ]}>
-            {formatTime(timestamp)}
+          <Text
+            style={[
+              styles.timestamp,
+              isOwnMessage
+                ? styles.ownTimestamp
+                : styles.otherTimestamp,
+            ]}
+          >
+            {formattedTime}
           </Text>
+
           {isOwnMessage && (
             <Text style={styles.statusIcon}>{getStatusIcon()}</Text>
           )}
@@ -87,12 +111,15 @@ const styles = StyleSheet.create({
     marginVertical: 4,
     marginHorizontal: 12,
   },
+
   ownMessageContainer: {
     alignItems: 'flex-end',
   },
+
   otherMessageContainer: {
     alignItems: 'flex-start',
   },
+
   bubble: {
     maxWidth: '75%',
     borderRadius: 16,
@@ -103,32 +130,39 @@ const styles = StyleSheet.create({
     shadowRadius: 2,
     elevation: 2,
   },
+
   ownBubble: {
-    backgroundColor: '#4A90E2',
+    backgroundColor: COLORS.primary,
     borderBottomRightRadius: 4,
   },
+
   otherBubble: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: COLORS.surface,
     borderWidth: 1,
-    borderColor: '#E0E0E0',
+    borderColor: COLORS.border,
     borderBottomLeftRadius: 4,
   },
+
   senderName: {
     fontSize: 12,
     fontWeight: '600',
-    color: '#4A90E2',
+    color: COLORS.primary,
     marginBottom: 4,
   },
+
   messageText: {
     fontSize: 16,
     lineHeight: 20,
   },
+
   ownMessageText: {
-    color: '#FFFFFF',
+    color: COLORS.surface,
   },
+
   otherMessageText: {
-    color: '#333333',
+    color: COLORS.text,
   },
+
   footer: {
     flexDirection: 'row',
     justifyContent: 'flex-end',
@@ -136,15 +170,19 @@ const styles = StyleSheet.create({
     marginTop: 4,
     gap: 4,
   },
+
   timestamp: {
     fontSize: 11,
   },
+
   ownTimestamp: {
     color: 'rgba(255, 255, 255, 0.7)',
   },
+
   otherTimestamp: {
-    color: '#999999',
+    color: COLORS.textLighter,
   },
+
   statusIcon: {
     fontSize: 12,
     color: 'rgba(255, 255, 255, 0.9)',

@@ -6,6 +6,7 @@
 
 import React from 'react';
 import { View, ActivityIndicator, Text, StyleSheet } from 'react-native';
+import { COLORS } from '../constants';
 
 interface LoadingProps {
   message?: string;
@@ -16,11 +17,11 @@ interface LoadingProps {
 export const Loading: React.FC<LoadingProps> = ({
   message = 'Loading...',
   size = 'large',
-  color = '#4A90E2',
+  color = COLORS.primary,
 }) => {
   return (
     <View style={styles.container}>
-      <ActivityIndicator size={size} color={color} />
+      <ActivityIndicator size={size} color={color} accessibilityRole="progressbar" accessibilityLabel={message}/>
       {message && <Text style={styles.message}>{message}</Text>}
     </View>
   );
@@ -31,15 +32,16 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#F5F5F5',
+    backgroundColor: COLORS.background,
     padding: 20,
   },
   message: {
     marginTop: 16,
     fontSize: 16,
-    color: '#666666',
+    color: COLORS.textLight,
     textAlign: 'center',
   },
 });
+
 
 export default Loading;

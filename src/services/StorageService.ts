@@ -5,6 +5,7 @@
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { UserSettings } from '../types';
+import { generateDeviceId } from '../utils/helpers';
 
 // ---------------------------------------------------------------------------
 // Storage Keys (single source of truth)
@@ -17,18 +18,6 @@ const KEYS = {
 // STORAGE SERVICE
 // ============================================================================
 class StorageService {
-  // -------------------------------------------------------------------------
-  // DEVICE ID
-  // -------------------------------------------------------------------------
-
-  /**
-   * Generate a short unique device ID (2 bytes → 0xABCD)
-   * NOTE: collision is acceptable for mesh (handled at protocol layer)
-   */
-  generateDeviceId(): string {
-    const random = Math.floor(Math.random() * 0xffff);
-    return `0x${random.toString(16).padStart(4, '0').toUpperCase()}`;
-  }
 
   // -------------------------------------------------------------------------
   // INITIALIZATION
@@ -42,7 +31,7 @@ class StorageService {
 
     if (!settings) {
       settings = {
-        device_id: this.generateDeviceId(),
+        device_id: generateDeviceId(),
         username: `User-${Math.floor(Math.random() * 10000)}`,
         encryptionEnabled: false,
       };
@@ -105,7 +94,12 @@ class StorageService {
    */
   async getDeviceId(): Promise<string> {
     const settings = await this.getUserSettings();
-    return settings?.device_id ?? this.generateDeviceId();
+    if (!settings) {
+      // If we reach here after initialization, something is wrong.
+      // Don't generate a new one; throw an error or return an empty string.
+      throw new Error("Storage not initialized");
+    }
+    return settings.device_id;
   }
 
   // -------------------------------------------------------------------------
@@ -124,6 +118,6 @@ class StorageService {
     }
   }
 }
-
+export const STORAGE_KEYS = KEYS;
 // Export singleton
 export default new StorageService();

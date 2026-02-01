@@ -1,6 +1,6 @@
 // ============================================================================
-// MESH PROTOCOL SERVICE - MOST IMPORTANT FILE
-// Copy to: your-project/src/services/MeshProtocolService.ts
+// MESH PROTOCOL SERVICE - FIXED & SAFE VERSION
+// Location: src/services/MeshProtocolService.ts
 // ============================================================================
 
 import {
@@ -14,29 +14,20 @@ import {
 import DatabaseService from '../database/DatabaseService';
 import BLEService from './BLEService';
 import { v4 as uuidv4 } from 'uuid';
-
-const CONFIG = {
-  SEEN_MESSAGES_MAX: 1000,
-  SEEN_MESSAGE_TTL: 60000,
-  NEIGHBOR_CACHE_MAX: 100,
-  NEIGHBOR_EXPIRY: 10000,
-  FORWARDING_JITTER_MIN: 50,
-  FORWARDING_JITTER_MAX: 200,
-  REDUNDANCY_COUNT: 3,
-  BASE_TTL_CHAT: 2,
-  BASE_TTL_BROADCAST: 5,
-  ADAPTIVE_TTL_THRESHOLD: 3,
-};
+import { MESH_CONFIG } from '../constants';
 
 class MeshProtocolService {
   private seenMessages: Map<string, SeenMessageEntry> = new Map();
-  private forwardingQueue: MeshPacket[] = [];
   private neighborCache: Map<string, NeighborEntry> = new Map();
   private deviceId: string = '';
   private isInitialized: boolean = false;
+
   private messageListeners: Array<(message: StoredMessage) => void> = [];
   private neighborListeners: Array<(neighbors: NeighborEntry[]) => void> = [];
 
+  // =========================================================================
+  // INITIALIZATION
+  // =========================================================================
   async init(deviceId: string): Promise<void> {
     this.deviceId = deviceId;
     this.isInitialized = true;
@@ -44,7 +35,18 @@ class MeshProtocolService {
     console.log('✅ MeshProtocolService initialized with ID:', deviceId);
   }
 
+  private ensureInitialized(): void {
+    if (!this.isInitialized || !this.deviceId) {
+      throw new Error('❌ MeshProtocolService not initialized');
+    }
+  }
+
+  // =========================================================================
+  // SEND MESSAGES
+  // =========================================================================
   async sendChatMessage(destId: string, payload: string): Promise<string> {
+    this.ensureInitialized();
+
     const packet: MeshPacket = {
       msg_id: uuidv4(),
       src_id: this.deviceId,
@@ -54,23 +56,27 @@ class MeshProtocolService {
       payload,
       timestamp: Date.now(),
     };
+
     return this.sendPacket(packet);
   }
 
-  async sendBroadcastMessage(payload: string, isEmergency: boolean = false): Promise<string> {
-    const flags = isEmergency 
+  async sendBroadcastMessage(payload: string, isEmergency = false): Promise<string> {
+    this.ensureInitialized();
+
+    const flags = isEmergency
       ? MessageFlags.BROADCAST | MessageFlags.EMERGENCY
       : MessageFlags.BROADCAST;
 
     const packet: MeshPacket = {
       msg_id: uuidv4(),
       src_id: this.deviceId,
-      dest_id: '0xFFFF',
+      dest_id: MESH_CONFIG.BROADCAST_ADDRESS,
       flags,
-      ttl: CONFIG.BASE_TTL_BROADCAST,
+      ttl: this.calculateTTL(flags),
       payload,
       timestamp: Date.now(),
     };
+
     return this.sendPacket(packet);
   }
 
@@ -78,7 +84,7 @@ class MeshProtocolService {
     this.seenMessages.set(packet.msg_id, {
       msg_id: packet.msg_id,
       timestamp: Date.now(),
-      status: 'CONSUMED',
+      forwarded: false,
     });
 
     const storedMessage: StoredMessage = {
@@ -90,60 +96,78 @@ class MeshProtocolService {
       timestamp: packet.timestamp!,
       ui_state: MessageState.SENDING,
     };
+
     await DatabaseService.saveMessage(storedMessage);
     await this.advertisePacketWithRedundancy(packet);
+
     return packet.msg_id;
   }
 
-  private async advertisePacketWithRedundancy(packet: MeshPacket): Promise<void> {
-    for (let i = 0; i < CONFIG.REDUNDANCY_COUNT; i++) {
-      const jitter = Math.random() * (CONFIG.FORWARDING_JITTER_MAX - CONFIG.FORWARDING_JITTER_MIN) + CONFIG.FORWARDING_JITTER_MIN;
-      setTimeout(async () => {
-        await BLEService.advertisePacket(packet);
-      }, i === 0 ? 0 : jitter * (i + 1));
-    }
-  }
-
+  // =========================================================================
+  // RECEIVING / FORWARDING
+  // =========================================================================
   async onPacketReceived(packet: MeshPacket): Promise<void> {
-    if (this.seenMessages.has(packet.msg_id)) {
-      return;
-    }
+    if (packet.src_id === this.deviceId) return;
 
-    if (packet.src_id === this.deviceId) {
+    const entry = this.seenMessages.get(packet.msg_id);
+    if (entry) {
+      if (packet.ttl > 0 && !entry.forwarded) {
+        entry.forwarded = true;
+        await this.forwardPacket(packet);
+      }
       return;
     }
 
     this.seenMessages.set(packet.msg_id, {
       msg_id: packet.msg_id,
       timestamp: Date.now(),
-      status: 'FORWARDED',
+      forwarded: false,
     });
 
+    // 🔵 Logical neighbor (packet sender)
     this.updateNeighborCache(packet.src_id);
 
     const isForMe = packet.dest_id === this.deviceId;
-    const isBroadcast = packet.dest_id === '0xFFFF';
+    const isBroadcast = packet.dest_id === MESH_CONFIG.BROADCAST_ADDRESS;
 
     if (isForMe || isBroadcast) {
       await this.deliverToUI(packet);
     }
 
-    if (packet.ttl > 0) {
+    const newEntry = this.seenMessages.get(packet.msg_id)!;
+    if (packet.ttl > 0 && !newEntry.forwarded) {
+      newEntry.forwarded = true;
       await this.forwardPacket(packet);
     }
   }
 
   private async forwardPacket(packet: MeshPacket): Promise<void> {
-    const forwardedPacket = {
+    const forwardedPacket: MeshPacket = {
       ...packet,
       ttl: packet.ttl - 1,
     };
 
-    const delay = Math.random() * (CONFIG.FORWARDING_JITTER_MAX - CONFIG.FORWARDING_JITTER_MIN) + CONFIG.FORWARDING_JITTER_MIN;
+    const delay =
+      Math.random() *
+        (MESH_CONFIG.FORWARDING_JITTER_MAX - MESH_CONFIG.FORWARDING_JITTER_MIN) +
+      MESH_CONFIG.FORWARDING_JITTER_MIN;
 
-    setTimeout(async () => {
-      await BLEService.advertisePacket(forwardedPacket);
+    setTimeout(() => {
+      BLEService.advertisePacket(forwardedPacket);
     }, delay);
+  }
+
+  private async advertisePacketWithRedundancy(packet: MeshPacket): Promise<void> {
+    for (let i = 0; i < MESH_CONFIG.REDUNDANCY_COUNT; i++) {
+      const jitter =
+        Math.random() *
+          (MESH_CONFIG.FORWARDING_JITTER_MAX - MESH_CONFIG.FORWARDING_JITTER_MIN) +
+        MESH_CONFIG.FORWARDING_JITTER_MIN;
+
+      setTimeout(() => {
+        BLEService.advertisePacket(packet);
+      }, i === 0 ? 0 : jitter * (i + 1));
+    }
   }
 
   private async deliverToUI(packet: MeshPacket): Promise<void> {
@@ -158,113 +182,110 @@ class MeshProtocolService {
     };
 
     await DatabaseService.saveMessage(storedMessage);
-    this.messageListeners.forEach(listener => listener(storedMessage));
+    this.messageListeners.forEach(cb => cb(storedMessage));
   }
 
+  // =========================================================================
+  // NEIGHBORS
+  // =========================================================================
   private updateNeighborCache(srcId: string): void {
     this.neighborCache.set(srcId, {
       src_id: srcId,
       lastSeenTime: Date.now(),
     });
 
-    if (this.neighborCache.size > CONFIG.NEIGHBOR_CACHE_MAX) {
-      const oldestKey = Array.from(this.neighborCache.entries())
-        .sort((a, b) => a[1].lastSeenTime - b[1].lastSeenTime)[0][0];
-      this.neighborCache.delete(oldestKey);
+    if (this.neighborCache.size > MESH_CONFIG.NEIGHBOR_CACHE_MAX) {
+      const oldest = Array.from(this.neighborCache.entries()).sort(
+        (a, b) => a[1].lastSeenTime - b[1].lastSeenTime
+      )[0][0];
+      this.neighborCache.delete(oldest);
     }
 
     this.notifyNeighborListeners();
   }
 
-  private calculateTTL(flags: number): number {
-    const neighborCount = this.getActiveNeighbors().length;
-    
-    if (flags & MessageFlags.BROADCAST || flags & MessageFlags.EMERGENCY) {
-      return CONFIG.BASE_TTL_BROADCAST;
-    }
-
-    let ttl = CONFIG.BASE_TTL_CHAT;
-    if (neighborCount >= CONFIG.ADAPTIVE_TTL_THRESHOLD) {
-      ttl = 2;
-    } else if (neighborCount < CONFIG.ADAPTIVE_TTL_THRESHOLD) {
-      ttl = 3;
-    }
-
-    return ttl;
+  // 🔥 NEW: physical neighbor update (scanner-only fix)
+  updatePhysicalNeighbor(deviceId: string): void {
+    this.updateNeighborCache(deviceId);
   }
 
   getActiveNeighbors(): NeighborEntry[] {
     const now = Date.now();
-    return Array.from(this.neighborCache.values())
-      .filter(neighbor => now - neighbor.lastSeenTime < CONFIG.NEIGHBOR_EXPIRY);
+    return Array.from(this.neighborCache.values()).filter(
+      n => now - n.lastSeenTime < MESH_CONFIG.NEIGHBOR_EXPIRY
+    );
   }
 
-  private startCleanupTasks(): void {
-    setInterval(() => {
-      this.cleanSeenMessages();
-    }, 30000);
+  private calculateTTL(flags: number): number {
+  // 🚨 Emergency broadcasts get max spread
+  if (flags & MessageFlags.EMERGENCY) {
+    return MESH_CONFIG.BASE_TTL_BROADCAST;
+  }
 
-    setInterval(() => {
-      this.cleanNeighborCache();
-    }, 10000);
+  // 📢 Normal broadcasts still spread, but controlled
+  if (flags & MessageFlags.BROADCAST) {
+    return Math.min(
+      MESH_CONFIG.BASE_TTL_BROADCAST - 1,
+      MESH_CONFIG.MAX_TTL
+    );
+  }
+
+  // 💬 Chat messages: adaptive
+  const neighbors = this.getActiveNeighbors().length;
+  return neighbors >= MESH_CONFIG.ADAPTIVE_TTL_THRESHOLD ? 2 : 3;
+}
+
+
+  // =========================================================================
+  // CLEANUP
+  // =========================================================================
+  private startCleanupTasks(): void {
+    setInterval(() => this.cleanSeenMessages(), MESH_CONFIG.CLEANUP_INTERVAL_SEEN);
+    setInterval(() => this.cleanNeighborCache(), MESH_CONFIG.CLEANUP_INTERVAL_NEIGHBORS);
   }
 
   private cleanSeenMessages(): void {
     const now = Date.now();
-    const entriesToDelete: string[] = [];
-
-    this.seenMessages.forEach((entry, msgId) => {
-      if (now - entry.timestamp > CONFIG.SEEN_MESSAGE_TTL) {
-        entriesToDelete.push(msgId);
+    for (const [id, entry] of this.seenMessages) {
+      if (now - entry.timestamp > MESH_CONFIG.SEEN_MESSAGE_TTL) {
+        this.seenMessages.delete(id);
       }
-    });
-
-    entriesToDelete.forEach(msgId => this.seenMessages.delete(msgId));
-
-    if (this.seenMessages.size > CONFIG.SEEN_MESSAGES_MAX) {
-      const sortedEntries = Array.from(this.seenMessages.entries())
-        .sort((a, b) => a[1].timestamp - b[1].timestamp);
-      
-      const toDelete = sortedEntries.slice(0, sortedEntries.length - CONFIG.SEEN_MESSAGES_MAX);
-      toDelete.forEach(([msgId]) => this.seenMessages.delete(msgId));
     }
-
-    console.log(`🧹 Cleaned seen messages. Current size: ${this.seenMessages.size}`);
   }
 
   private cleanNeighborCache(): void {
     const now = Date.now();
-    const entriesToDelete: string[] = [];
+    let changed = false;
 
-    this.neighborCache.forEach((entry, srcId) => {
-      if (now - entry.lastSeenTime > CONFIG.NEIGHBOR_EXPIRY) {
-        entriesToDelete.push(srcId);
+    for (const [id, entry] of this.neighborCache) {
+      if (now - entry.lastSeenTime > MESH_CONFIG.NEIGHBOR_EXPIRY) {
+        this.neighborCache.delete(id);
+        changed = true;
       }
-    });
-
-    entriesToDelete.forEach(srcId => this.neighborCache.delete(srcId));
-    
-    if (entriesToDelete.length > 0) {
-      this.notifyNeighborListeners();
     }
+
+    if (changed) this.notifyNeighborListeners();
   }
 
   private notifyNeighborListeners(): void {
-    const activeNeighbors = this.getActiveNeighbors();
-    this.neighborListeners.forEach(listener => listener(activeNeighbors));
+    const active = this.getActiveNeighbors();
+    this.neighborListeners.forEach(cb => cb(active));
   }
 
-  onMessage(callback: (message: StoredMessage) => void): () => void {
-    this.messageListeners.push(callback);
+  // =========================================================================
+  // SUBSCRIPTIONS
+  // =========================================================================
+  onMessage(cb: (message: StoredMessage) => void): () => void {
+    this.messageListeners.push(cb);
     return () => {
-      this.messageListeners = this.messageListeners.filter(cb => cb !== callback);
+      this.messageListeners = this.messageListeners.filter(l => l !== cb);
     };
   }
 
-  onNeighborsChange(callback: (neighbors: NeighborEntry[]) => void): () => void {
-    this.neighborListeners.push(callback);
+  onNeighborsChange(cb: (neighbors: NeighborEntry[]) => void): () => void {
+    this.neighborListeners.push(cb);
     return () => {
-      this.neighborListeners = this.neighborListeners.filter(cb => cb !== callback);
+      this.neighborListeners = this.neighborListeners.filter(l => l !== cb);
     };
   }
 }

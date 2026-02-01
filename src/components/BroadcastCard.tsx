@@ -6,6 +6,7 @@
 
 import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
+import { COLORS } from '../constants';
 
 interface BroadcastCardProps {
   message: string;
@@ -20,7 +21,9 @@ export const BroadcastCard: React.FC<BroadcastCardProps> = ({
   timestamp,
   isEmergency,
 }) => {
-  const formatTimestamp = (timestamp: number): string => {
+  const displaySender =senderId.length > 8 ? senderId.slice(0, 8) + '…' : senderId;
+  const formatTimestamp = React.useCallback(
+    (timestamp: number): string => {
     const date = new Date(timestamp);
     const now = new Date();
     
@@ -39,15 +42,18 @@ export const BroadcastCard: React.FC<BroadcastCardProps> = ({
       hour: '2-digit',
       minute: '2-digit'
     });
-  };
+  },
+  []
+  );
 
   return (
-    <View style={[
-      styles.container,
-      isEmergency && styles.emergencyContainer
-    ]}>
+    <View
+      style={[styles.container, isEmergency && styles.emergencyContainer]}
+      accessibilityLabel={isEmergency ? 'Emergency broadcast message' : 'Broadcast message'}
+    >
+
       <View style={styles.header}>
-        <Text style={styles.senderId}>{senderId}</Text>
+        <Text style={styles.senderId}>{displaySender}</Text>
         {isEmergency && (
           <View style={styles.emergencyBadge}>
             <Text style={styles.emergencyText}>🚨 EMERGENCY</Text>
@@ -71,7 +77,7 @@ export const BroadcastCard: React.FC<BroadcastCardProps> = ({
 
 const styles = StyleSheet.create({
   container: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: COLORS.surface,
     borderRadius: 12,
     padding: 16,
     marginBottom: 12,
@@ -82,47 +88,53 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
     elevation: 3,
   },
+
   emergencyContainer: {
     borderWidth: 2,
-    borderColor: '#FF5252',
+    borderColor: COLORS.danger,
     backgroundColor: '#FFF5F5',
   },
+
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: 8,
   },
+
   senderId: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#4A90E2',
+    color: COLORS.primary,
   },
+
   emergencyBadge: {
-    backgroundColor: '#FF5252',
+    backgroundColor: COLORS.danger,
     borderRadius: 12,
     paddingHorizontal: 10,
     paddingVertical: 4,
   },
+
   emergencyText: {
     fontSize: 11,
     fontWeight: 'bold',
-    color: '#FFFFFF',
+    color: COLORS.surface,
   },
+
   message: {
     fontSize: 16,
-    color: '#333333',
+    color: COLORS.text,
     lineHeight: 22,
     marginBottom: 8,
   },
+
   emergencyMessage: {
     fontWeight: '500',
     color: '#000000',
   },
+
   timestamp: {
     fontSize: 12,
-    color: '#999999',
+    color: COLORS.textLighter,
   },
 });
-
-export default BroadcastCard;

@@ -80,17 +80,8 @@ export const ERROR_MESSAGES = {
   INITIALIZATION_FAILED: 'Failed to initialize app. Please restart.',
   DATABASE_ERROR: 'Database error occurred.',
   NETWORK_ERROR: 'Network error. Check your Bluetooth connection.',
-} as const;
-
-export const MESSAGE_FLAGS = {
-  CHAT: 0x01,
-  BROADCAST: 0x02,
-  EMERGENCY: 0x04,
-} as const;
-
-export const MESSAGE_STATES = {
-  SENDING: 'SENDING',
-  MAYBE: 'MAYBE',
-  CONFIRMED: 'CONFIRMED',
-  FAILED: 'FAILED',
+  PERMISSIONS_REQUIRED_TITLE: 'Permissions Required',
+  PERMISSIONS_REQUIRED_DESC:'This app needs Bluetooth and Location permissions to discover nearby devices.',
+  ENABLE_BLUETOOTH_TITLE: 'Enable Bluetooth',
+  ENABLE_BLUETOOTH_DESC:'Please enable Bluetooth in your device settings to continue.',
 } as const;

@@ -61,7 +61,7 @@ export interface StoredMessage {
 export interface SeenMessageEntry {
   msg_id: string;
   timestamp: number;
-  status: 'FORWARDED' | 'CONSUMED';
+  forwarded: boolean;
 }
 
 export interface NeighborEntry {
@@ -84,6 +84,7 @@ export interface MeshMessage {
   timestamp: number;
   ttl: number;
   isRead: boolean;
+  isEmergency?: boolean;
 }
 
 export interface Neighbor {
@@ -232,3 +233,5 @@ export interface LoadingProps {
   size?: 'small' | 'large';
   color?: string;
 }
+
+export * from './broadcast';

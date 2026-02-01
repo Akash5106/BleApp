@@ -1,10 +1,10 @@
 // ============================================================================
 // NEARBY PEERS SCREEN
 // Location: src/screens/NearbyPeersScreen.tsx
-// Purpose: Discover and connect to nearby mesh devices
+// Purpose: Discover and connect to nearby mesh devices (FINAL, SAFE)
 // ============================================================================
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -14,146 +14,183 @@ import {
   SafeAreaView,
   TouchableOpacity,
 } from 'react-native';
+
 import { PeerCard } from '../components/PeerCard';
 import { EmptyState } from '../components/EmptyState';
-import { Loading } from '../components/Loading';
+
 import { useMeshProtocol } from '../hooks/useMeshProtocol';
 import { useBlePermissions } from '../hooks/useBlePermissions';
 import BLEService from '../services/BLEService';
-import { COLORS } from '../constant';
+import { COLORS } from '../constants';
 
 interface NearbyPeersScreenProps {
-  onSelectPeer: (peerId: string, peerName: string)=>void;
+  onSelectPeer: (peerId: string, peerName: string) => void;
 }
 
-export const NearbyPeersScreen: React.FC<NearbyPeersScreenProps> = ({onSelectPeer }) => {
-  const { neighbors, getActiveNeighbors } = useMeshProtocol();
-  const { granted, bluetoothEnabled, requestPermissions, enableBluetooth } = useBlePermissions();
-  
+export const NearbyPeersScreen: React.FC<NearbyPeersScreenProps> = ({
+  onSelectPeer,
+}) => {
+  const { getActiveNeighbors } = useMeshProtocol();
+  const {
+    granted,
+    bluetoothEnabled,
+    requestPermissions,
+    enableBluetooth,
+  } = useBlePermissions();
+
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isScanning, setIsScanning] = useState(false);
 
+  const scanTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const scanningRef = useRef(false);
+
+  const activeNeighbors = getActiveNeighbors();
+
+  // =========================================================================
+  // AUTO SCAN WHEN READY
+  // =========================================================================
   useEffect(() => {
     if (granted && bluetoothEnabled) {
       startScanning();
     }
+
+    return () => {
+      if (scanTimeoutRef.current) {
+        clearTimeout(scanTimeoutRef.current);
+      }
+    };
   }, [granted, bluetoothEnabled]);
 
+  // =========================================================================
+  // START SCANNING (GUARDED)
+  // =========================================================================
   const startScanning = async () => {
+    if (scanningRef.current) return;
+
     try {
+      scanningRef.current = true;
       setIsScanning(true);
+
       await BLEService.startScan();
-      setTimeout(() => {
+
+      scanTimeoutRef.current = setTimeout(() => {
+        scanningRef.current = false;
         setIsScanning(false);
       }, 5000);
     } catch (error) {
       console.error('❌ Failed to start scanning:', error);
+      scanningRef.current = false;
       setIsScanning(false);
     }
   };
 
+  // =========================================================================
+  // REFRESH
+  // =========================================================================
   const handleRefresh = async () => {
+    if (isScanning) return;
+
     setIsRefreshing(true);
     await startScanning();
     setIsRefreshing(false);
   };
 
-  const handlePeerPress = (peerId: string, peerName?: string) => {
-    onSelectPeer(peerId, peerName || peerId);
+  // =========================================================================
+  // PEER SELECT (ID-ONLY, SAFE)
+  // =========================================================================
+  const handlePeerPress = (peerId: string) => {
+    // peerName is not implemented anywhere → use peerId
+    onSelectPeer(peerId, peerId);
   };
 
-  const handleEnableBluetooth = async () => {
-    await enableBluetooth();
-  };
-
-  const handleRequestPermissions = async () => {
-    await requestPermissions();
-  };
-
+  // =========================================================================
+  // PERMISSION GATE
+  // =========================================================================
   if (!granted) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <EmptyState
+          icon="🔐"
+          title="Permissions Required"
+          description="Bluetooth and Location permissions are required."
+          action={
+            <TouchableOpacity
+              style={styles.actionButton}
+              onPress={requestPermissions}
+            >
+              <Text style={styles.actionButtonText}>
+                Grant Permissions
+              </Text>
+            </TouchableOpacity>
+          }
+        />
+      </SafeAreaView>
+    );
+  }
+
+  // =========================================================================
+  // BLUETOOTH GATE
+  // =========================================================================
+  if (!bluetoothEnabled) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <EmptyState
+          icon="📡"
+          title="Bluetooth is Off"
+          description="Enable Bluetooth to discover nearby devices."
+          action={
+            <TouchableOpacity
+              style={styles.actionButton}
+              onPress={enableBluetooth}
+            >
+              <Text style={styles.actionButtonText}>
+                Enable Bluetooth
+              </Text>
+            </TouchableOpacity>
+          }
+        />
+      </SafeAreaView>
+    );
+  }
+
+  // =========================================================================
+  // RENDER
+  // =========================================================================
   return (
     <SafeAreaView style={styles.container}>
-      <EmptyState
-        icon="🔐"
-        title="Permissions Required"
-        description="This app needs Bluetooth and Location permissions to discover nearby devices."
-        action={
-          <TouchableOpacity
-            style={styles.actionButton}
-            onPress={handleRequestPermissions}
-          >
-            <Text style={styles.actionButtonText}>Grant Permissions</Text>
-          </TouchableOpacity>
-        }
-      />
-    </SafeAreaView>
-  );
-}
-
-if (!bluetoothEnabled) {
-  return (
-    <SafeAreaView style={styles.container}>
-      <EmptyState
-        icon="📡"
-        title="Bluetooth is Off"
-        description="Please enable Bluetooth to discover nearby devices."
-        action={
-          <TouchableOpacity
-            style={styles.actionButton}
-            onPress={handleEnableBluetooth}
-          >
-            <Text style={styles.actionButtonText}>Enable Bluetooth</Text>
-          </TouchableOpacity>
-        }
-      />
-    </SafeAreaView>
-  );
-}
-
-
-  const renderHeader = () => (
-    <View style={styles.header}>
-      <View style={styles.headerTop}>
-        <Text style={styles.headerTitle}>Nearby Devices</Text>
-        {isScanning && <Text style={styles.scanningText}>🔍 Scanning...</Text>}
+      <View style={styles.header}>
+        <View style={styles.headerTop}>
+          <Text style={styles.headerTitle}>Nearby Devices</Text>
+          {isScanning && (
+            <Text style={styles.scanningText}>🔍 Scanning...</Text>
+          )}
+        </View>
+        <Text style={styles.headerSubtitle}>
+          {activeNeighbors.length} device
+          {activeNeighbors.length !== 1 ? 's' : ''} online
+        </Text>
       </View>
-      <Text style={styles.headerSubtitle}>
-        {neighbors.length} device{neighbors.length !== 1 ? 's' : ''} found
-      </Text>
-    </View>
-  );
 
-  const renderPeer = ({ item }: { item: any }) => (
-    <PeerCard
-      deviceId={item.deviceId}
-      deviceName={item.deviceName}
-      lastSeen={item.lastSeen}
-      rssi={item.rssi}
-      isActive={item.isActive}
-      onPress={() => handlePeerPress(item.deviceId, item.deviceName)}
-    />
-  );
-
-  return (
-    <SafeAreaView style={styles.container}>
-      {renderHeader()}
-      
-      {neighbors.length === 0 && !isScanning ? (
+      {activeNeighbors.length === 0 && !isScanning ? (
         <EmptyState
           icon="🔍"
           title="No Devices Found"
-          description="Make sure other devices are nearby with the app open and Bluetooth enabled."
+          description="Ensure nearby devices have the app open."
           action={
-            <TouchableOpacity style={styles.actionButton} onPress={handleRefresh}>
-              <Text style={styles.actionButtonText}>Scan Again</Text>
+            <TouchableOpacity
+              style={styles.actionButton}
+              onPress={handleRefresh}
+            >
+              <Text style={styles.actionButtonText}>
+                Scan Again
+              </Text>
             </TouchableOpacity>
           }
         />
       ) : (
         <FlatList
-          data={neighbors}
-          renderItem={renderPeer}
-          keyExtractor={(item) => item.deviceId}
+          data={activeNeighbors}
+          keyExtractor={item => item.deviceId}
           contentContainerStyle={styles.listContent}
           refreshControl={
             <RefreshControl
@@ -162,12 +199,25 @@ if (!bluetoothEnabled) {
               tintColor={COLORS.primary}
             />
           }
+          renderItem={({ item }) => (
+            <PeerCard
+              deviceId={item.deviceId}
+              deviceName={item.deviceId}
+              lastSeen={item.lastSeen}
+              rssi={item.rssi}
+              isActive={item.isActive}
+              onPress={() => handlePeerPress(item.deviceId)}
+            />
+          )}
         />
       )}
     </SafeAreaView>
   );
 };
 
+// ============================================================================
+// STYLES
+// ============================================================================
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -195,7 +245,7 @@ const styles = StyleSheet.create({
   },
   headerSubtitle: {
     fontSize: 14,
-    color: 'rgba(255, 255, 255, 0.8)',
+    color: 'rgba(255,255,255,0.8)',
   },
   listContent: {
     padding: 16,

@@ -1,5 +1,6 @@
 import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
+import { COLORS } from '../constants';
 
 interface EmptyStateProps {
   icon: string;
@@ -15,7 +16,7 @@ export const EmptyState: React.FC<EmptyStateProps> = ({
   action,
 }) => {
   return (
-    <View style={styles.container}>
+   <View style={styles.container} accessibilityRole="summary" accessibilityLabel={title}>
       <Text style={styles.icon}>{icon}</Text>
       <Text style={styles.title}>{title}</Text>
       <Text style={styles.description}>{description}</Text>
@@ -30,7 +31,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     padding: 32,
-    backgroundColor: '#F5F5F5',
+    backgroundColor: COLORS.background,
   },
   icon: {
     fontSize: 64,
@@ -39,13 +40,13 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 20,
     fontWeight: '600',
-    color: '#333333',
+    color: COLORS.text,
     marginBottom: 8,
     textAlign: 'center',
   },
   description: {
     fontSize: 14,
-    color: '#666666',
+    color: COLORS.textLight,
     textAlign: 'center',
     lineHeight: 20,
     maxWidth: 300,
@@ -54,5 +55,3 @@ const styles = StyleSheet.create({
     marginTop: 24,
   },
 });
-
-export default EmptyState;

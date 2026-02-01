@@ -7,15 +7,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import MeshProtocolService from './MeshProtocolService';
 import { generateUUID } from '../utils/helpers';
-
-interface QueuedBroadcast {
-  id: string;
-  message: string;
-  isEmergency: boolean;
-  timestamp: number;
-  attempts: number;
-  maxAttempts: number;
-}
+import { QueuedBroadcast } from '../types';
 
 class BroadcastQueueService {
   private queue: QueuedBroadcast[] = [];
@@ -74,6 +66,7 @@ class BroadcastQueueService {
       timestamp: Date.now(),
       attempts: 0,
       maxAttempts: isEmergency ? this.MAX_ATTEMPTS * 2 : this.MAX_ATTEMPTS,
+      nextAttemptAt: Date.now(),
     };
 
     this.queue.push(broadcast);
@@ -111,6 +104,13 @@ class BroadcastQueueService {
     if (activeNeighbors.length === 0) {
       return;
     }
+    const now = Date.now();
+
+    // ⭐ Only process messages whose retry time has arrived
+    const eligible = this.queue.filter(b => b.nextAttemptAt <= now);
+    if (eligible.length === 0) {
+      return;
+    }
 
     this.isProcessing = true;
 
@@ -140,8 +140,15 @@ class BroadcastQueueService {
           
           // Increment attempt counter
           broadcast.attempts++;
-
-          // Remove if max attempts reached
+          const baseDelay = broadcast.isEmergency ? 2000 : 5000;
+          const backoff = Math.min(
+            baseDelay * Math.pow(2, broadcast.attempts),
+            60_000 // cap at 1 minute
+          );
+          broadcast.nextAttemptAt = Date.now()+backoff;
+          console.error(
+            `❌ Failed broadcast ${broadcast.id}, retry in ${backoff}ms`
+          );
           if (broadcast.attempts >= broadcast.maxAttempts) {
             console.log(`❌ Max attempts reached for broadcast ${broadcast.id}, removing from queue`);
             toRemove.push(broadcast.id);

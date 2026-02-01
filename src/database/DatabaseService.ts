@@ -6,6 +6,7 @@
 
 import SQLite from 'react-native-sqlite-storage';
 import { StoredMessage, MessageState } from '../types';
+import { MESH_CONFIG } from '../constants';
 
 SQLite.enablePromise(true);
 
@@ -18,7 +19,7 @@ class DatabaseService {
   async init(): Promise<void> {
     try {
       this.db = await SQLite.openDatabase({
-        name: 'mesh_messages.db',
+        name: MESH_CONFIG.DB_NAME,
         location: 'default',
       });
 
@@ -34,31 +35,39 @@ class DatabaseService {
    * Create messages table with indexes
    */
   private async createTables(): Promise<void> {
-    const createMessagesTable = `
-      CREATE TABLE IF NOT EXISTS messages (
-        msg_id TEXT PRIMARY KEY,
-        src_id TEXT NOT NULL,
-        dest_id TEXT NOT NULL,
-        flags INTEGER NOT NULL,
-        payload TEXT NOT NULL,
-        timestamp INTEGER NOT NULL,
-        ui_state TEXT NOT NULL
-      );
-      
-      CREATE INDEX IF NOT EXISTS idx_timestamp ON messages(timestamp);
-      CREATE INDEX IF NOT EXISTS idx_dest_id ON messages(dest_id);
-      CREATE INDEX IF NOT EXISTS idx_src_id ON messages(src_id);
-    `;
+  if (!this.db) return;
 
-    await this.db?.executeSql(createMessagesTable);
-  }
+  await this.db.executeSql(`
+    CREATE TABLE IF NOT EXISTS messages (
+      msg_id TEXT PRIMARY KEY,
+      src_id TEXT NOT NULL,
+      dest_id TEXT NOT NULL,
+      flags INTEGER NOT NULL,
+      payload TEXT NOT NULL,
+      timestamp INTEGER NOT NULL,
+      ui_state TEXT NOT NULL
+    )
+  `);
+
+  await this.db.executeSql(
+    `CREATE INDEX IF NOT EXISTS idx_timestamp ON messages(timestamp)`
+  );
+
+  await this.db.executeSql(
+    `CREATE INDEX IF NOT EXISTS idx_dest_id ON messages(dest_id)`
+  );
+
+  await this.db.executeSql(
+    `CREATE INDEX IF NOT EXISTS idx_src_id ON messages(src_id)`
+  );
+}
 
   /**
    * Save a message to database
    */
   async saveMessage(message: StoredMessage): Promise<void> {
     const query = `
-      INSERT OR REPLACE INTO messages 
+      INSERT OR REPLACE INTO messages
       (msg_id, src_id, dest_id, flags, payload, timestamp, ui_state)
       VALUES (?, ?, ?, ?, ?, ?, ?)
     `;
@@ -80,19 +89,22 @@ class DatabaseService {
   }
 
   /**
-   * Get all messages for a specific destination (chat history)
+   * Get all messages for a specific destination (chat history + broadcasts)
    */
   async getMessages(destId: string): Promise<StoredMessage[]> {
     const query = `
-      SELECT * FROM messages 
-      WHERE dest_id = ? OR dest_id = '0xFFFF'
+      SELECT * FROM messages
+      WHERE dest_id = ? OR dest_id = ?
       ORDER BY timestamp ASC
     `;
 
     try {
-      const [results] = await this.db!.executeSql(query, [destId]);
-      const messages: StoredMessage[] = [];
+      const [results] = await this.db!.executeSql(query, [
+        destId,
+        MESH_CONFIG.BROADCAST_ADDRESS,
+      ]);
 
+      const messages: StoredMessage[] = [];
       for (let i = 0; i < results.rows.length; i++) {
         messages.push(results.rows.item(i));
       }
@@ -107,21 +119,26 @@ class DatabaseService {
   /**
    * Get messages between two devices (chat conversation)
    */
-  async getChatMessages(deviceId1: string, deviceId2: string): Promise<StoredMessage[]> {
+  async getChatMessages(
+    deviceId1: string,
+    deviceId2: string
+  ): Promise<StoredMessage[]> {
     const query = `
-      SELECT * FROM messages 
-      WHERE (src_id = ? AND dest_id = ?) 
+      SELECT * FROM messages
+      WHERE (src_id = ? AND dest_id = ?)
          OR (src_id = ? AND dest_id = ?)
       ORDER BY timestamp ASC
     `;
 
     try {
       const [results] = await this.db!.executeSql(query, [
-        deviceId1, deviceId2,
-        deviceId2, deviceId1,
+        deviceId1,
+        deviceId2,
+        deviceId2,
+        deviceId1,
       ]);
-      const messages: StoredMessage[] = [];
 
+      const messages: StoredMessage[] = [];
       for (let i = 0; i < results.rows.length; i++) {
         messages.push(results.rows.item(i));
       }
@@ -138,16 +155,18 @@ class DatabaseService {
    */
   async getBroadcastMessages(): Promise<StoredMessage[]> {
     const query = `
-      SELECT * FROM messages 
-      WHERE dest_id = '0xFFFF'
+      SELECT * FROM messages
+      WHERE dest_id = ?
       ORDER BY timestamp DESC
       LIMIT 100
     `;
 
     try {
-      const [results] = await this.db!.executeSql(query);
-      const messages: StoredMessage[] = [];
+      const [results] = await this.db!.executeSql(query, [
+        MESH_CONFIG.BROADCAST_ADDRESS,
+      ]);
 
+      const messages: StoredMessage[] = [];
       for (let i = 0; i < results.rows.length; i++) {
         messages.push(results.rows.item(i));
       }
@@ -162,9 +181,12 @@ class DatabaseService {
   /**
    * Update message state (SENDING → MAYBE → CONFIRMED)
    */
-  async updateMessageState(msgId: string, state: MessageState): Promise<void> {
+  async updateMessageState(
+    msgId: string,
+    state: MessageState
+  ): Promise<void> {
     const query = `UPDATE messages SET ui_state = ? WHERE msg_id = ?`;
-    
+
     try {
       await this.db?.executeSql(query, [state, msgId]);
     } catch (error) {
@@ -175,10 +197,14 @@ class DatabaseService {
   /**
    * Delete old messages (keep last N days)
    */
-  async cleanOldMessages(daysToKeep: number = 7): Promise<void> {
-    const cutoffTime = Date.now() - daysToKeep * 24 * 60 * 60 * 1000;
+  async cleanOldMessages(
+    daysToKeep: number = MESH_CONFIG.MESSAGE_RETENTION_DAYS
+  ): Promise<void> {
+    const cutoffTime =
+      Date.now() - daysToKeep * 24 * 60 * 60 * 1000;
+
     const query = `DELETE FROM messages WHERE timestamp < ?`;
-    
+
     try {
       await this.db?.executeSql(query, [cutoffTime]);
       console.log('🧹 Cleaned old messages');
@@ -192,7 +218,7 @@ class DatabaseService {
    */
   async getMessageCount(): Promise<number> {
     const query = `SELECT COUNT(*) as count FROM messages`;
-    
+
     try {
       const [results] = await this.db!.executeSql(query);
       return results.rows.item(0).count;
@@ -207,7 +233,7 @@ class DatabaseService {
    */
   async clearAllMessages(): Promise<void> {
     const query = `DELETE FROM messages`;
-    
+
     try {
       await this.db?.executeSql(query);
       console.log('🧹 Cleared all messages');

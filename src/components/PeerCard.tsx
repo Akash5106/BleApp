@@ -6,6 +6,7 @@
 
 import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import { COLORS } from '../constants';
 
 interface PeerCardProps {
   deviceId: string;
@@ -24,28 +25,24 @@ export const PeerCard: React.FC<PeerCardProps> = ({
   isActive,
   onPress,
 }) => {
+  const displayId =
+    deviceId.length > 8 ? deviceId.slice(0, 8) + '…' : deviceId;
+
   const formatLastSeen = (timestamp: number): string => {
     const secondsAgo = Math.floor((Date.now() - timestamp) / 1000);
-    
-    if (secondsAgo < 5) {
-      return 'Active now';
-    }
-    
-    if (secondsAgo < 60) {
-      return `${secondsAgo}s ago`;
-    }
-    
+
+    if (secondsAgo < 5) return 'Active now';
+    if (secondsAgo < 60) return `${secondsAgo}s ago`;
+
     const minutesAgo = Math.floor(secondsAgo / 60);
-    if (minutesAgo < 60) {
-      return `${minutesAgo}m ago`;
-    }
-    
+    if (minutesAgo < 60) return `${minutesAgo}m ago`;
+
     const hoursAgo = Math.floor(minutesAgo / 60);
     return `${hoursAgo}h ago`;
   };
 
   const getSignalStrength = (rssi?: number): string => {
-    if (!rssi) return '📶';
+    if (rssi === undefined) return '📶';
     if (rssi >= -60) return '📶 Strong';
     if (rssi >= -70) return '📶 Good';
     if (rssi >= -80) return '📶 Fair';
@@ -53,24 +50,30 @@ export const PeerCard: React.FC<PeerCardProps> = ({
   };
 
   return (
-    <TouchableOpacity 
-      style={styles.container} 
+    <TouchableOpacity
+      style={styles.container}
       onPress={onPress}
       activeOpacity={0.7}
+      accessibilityRole="button"
+      accessibilityLabel={`Peer ${deviceName ?? displayId}`}
     >
       <View style={styles.content}>
-        <View style={[
-          styles.statusDot,
-          isActive ? styles.statusActive : styles.statusInactive
-        ]} />
-        
+        <View
+          style={[
+            styles.statusDot,
+            isActive ? styles.statusActive : styles.statusInactive,
+          ]}
+        />
+
         <View style={styles.infoContainer}>
-          <Text style={styles.deviceId}>
-            {deviceName || deviceId}
+          <Text style={styles.deviceName}>
+            {deviceName || displayId}
           </Text>
+
           {deviceName && (
-            <Text style={styles.deviceIdSmall}>{deviceId}</Text>
+            <Text style={styles.deviceId}>{displayId}</Text>
           )}
+
           <Text style={styles.lastSeen}>
             {formatLastSeen(lastSeen)}
           </Text>
@@ -78,12 +81,14 @@ export const PeerCard: React.FC<PeerCardProps> = ({
 
         {rssi !== undefined && (
           <View style={styles.signalContainer}>
-            <Text style={styles.signalText}>{getSignalStrength(rssi)}</Text>
+            <Text style={styles.signalText}>
+              {getSignalStrength(rssi)}
+            </Text>
             <Text style={styles.rssiValue}>{rssi} dBm</Text>
           </View>
         )}
       </View>
-      
+
       <Text style={styles.arrow}>›</Text>
     </TouchableOpacity>
   );
@@ -91,7 +96,7 @@ export const PeerCard: React.FC<PeerCardProps> = ({
 
 const styles = StyleSheet.create({
   container: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: COLORS.surface,
     borderRadius: 12,
     padding: 16,
     marginBottom: 12,
@@ -105,57 +110,69 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
     elevation: 3,
   },
+
   content: {
     flexDirection: 'row',
     alignItems: 'center',
     flex: 1,
   },
+
   statusDot: {
     width: 12,
     height: 12,
     borderRadius: 6,
     marginRight: 12,
   },
+
   statusActive: {
-    backgroundColor: '#4CAF50',
+    backgroundColor: COLORS.success,
   },
+
   statusInactive: {
-    backgroundColor: '#999999',
+    backgroundColor: COLORS.textLighter,
   },
+
   infoContainer: {
     flex: 1,
   },
-  deviceId: {
+
+  deviceName: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#333333',
+    color: COLORS.text,
     marginBottom: 2,
   },
-  deviceIdSmall: {
+
+  deviceId: {
     fontSize: 12,
-    color: '#666666',
+    color: COLORS.textLight,
     marginBottom: 2,
   },
+
   lastSeen: {
     fontSize: 13,
-    color: '#666666',
+    color: COLORS.textLight,
   },
+
   signalContainer: {
     alignItems: 'flex-end',
     marginLeft: 8,
   },
+
   signalText: {
     fontSize: 14,
-    color: '#666666',
+    color: COLORS.textLight,
   },
+
   rssiValue: {
     fontSize: 11,
-    color: '#999999',
+    color: COLORS.textLighter,
     marginTop: 2,
   },
+
   arrow: {
     fontSize: 28,
-    color: '#999999',
+    color: COLORS.textLighter,
     marginLeft: 8,
   },
 });

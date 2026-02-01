@@ -25,6 +25,9 @@ class BleAdvertiserModule(
 
     private var advertisingPromise: Promise? = null
 
+    // ✅ ADDITIVE: track connected central devices (does not affect receive path)
+    private val connectedDevices = mutableSetOf<BluetoothDevice>()
+
     companion object {
         private const val TAG = "BleAdvertiser"
         val SERVICE_UUID: UUID = UUID.fromString("0000FFF0-0000-1000-8000-00805F9B34FB")
@@ -122,6 +125,21 @@ class BleAdvertiserModule(
             }
         }
 
+        // ✅ ADDITIVE: track connections (no impact on writes/reads)
+        override fun onConnectionStateChange(
+            device: BluetoothDevice,
+            status: Int,
+            newState: Int
+        ) {
+            if (newState == BluetoothProfile.STATE_CONNECTED) {
+                connectedDevices.add(device)
+                Log.d(TAG, "🔗 Device connected: ${device.address}")
+            } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
+                connectedDevices.remove(device)
+                Log.d(TAG, "🔌 Device disconnected: ${device.address}")
+            }
+        }
+
         override fun onCharacteristicWriteRequest(
             device: BluetoothDevice?,
             requestId: Int,
@@ -202,7 +220,7 @@ class BleAdvertiserModule(
                 com.facebook.react.modules.core.DeviceEventManagerModule
                     .RCTDeviceEventEmitter::class.java
             )
-            .emit("onMessageReceived", params)
+            .emit("onPacketReceived", params)
     }
 
     @ReactMethod
@@ -210,6 +228,7 @@ class BleAdvertiserModule(
         advertiser?.stopAdvertising(advertiseCallback)
         gattServer?.close()
         gattServer = null
+        connectedDevices.clear()
         promise.resolve("Advertising stopped")
     }
 

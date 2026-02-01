@@ -4,7 +4,7 @@
 // Purpose: Common utility functions used throughout the app
 // ============================================================================
 
-import { MESH_CONFIG } from '../constant';
+import { MESH_CONFIG } from '../constants';
 
 // ============================================================================
 // ID GENERATION
