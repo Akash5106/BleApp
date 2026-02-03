@@ -1,451 +1,573 @@
-// ============================================================================
-// MAIN APP COMPONENT - DEBUGGED & ENHANCED
-// Initializes services including broadcast queue and handles navigation
-// ============================================================================
-
-import React, { useEffect, useState } from 'react';
+import { Buffer } from "buffer";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import {
-  View,
-  Text,
-  TouchableOpacity,
-  StyleSheet,
+  Alert,
   PermissionsAndroid,
   Platform,
-  Alert,
-  ActivityIndicator,
-} from 'react-native';
-import { ChatScreen } from './src/screens/ChatScreen';
-import { NearbyPeersScreen } from './src/screens/NearbyPeersScreen';
-import { BroadcastScreen } from './src/screens/BroadcastScreen';
-import DatabaseService from './src/database/DatabaseService';
-import MeshProtocolService from './src/services/MeshProtocolService';
-import BLEService from './src/services/BLEService';
-import StorageService from './src/services/StorageService';
-import BroadcastQueueService from './src/services/BroadcastQueueService';
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+  Button,
+  NativeModules,
+  NativeEventEmitter,
+  ScrollView,
+  TextInput,
+} from "react-native";
+import { BleManager, Device } from "react-native-ble-plx";
 
-type Screen = 'peers' | 'chat' | 'broadcast';
+const { BleAdvertiser } = NativeModules;
+const manager = new BleManager();
+const SERVICE_UUID = "12345678-1234-1234-1234-123456789abc";
+const CHAR_UUID = "87654321-4321-4321-4321-cba987654321";
 
-interface ChatInfo {
-  peerId: string;
-  peerName: string;
+const MESSAGE_TYPE = { CHAT: "CHAT", FLOOD: "FLOOD" };
+
+interface Message {
+  id: string;
+  type: string;
+  content: string;
+  sender: string;
+  timestamp: number;
+  ttl: number;
+  hops: number;
 }
 
-const App: React.FC = () => {
-  const [currentScreen, setCurrentScreen] = useState<Screen>('peers');
-  const [chatInfo, setChatInfo] = useState<ChatInfo | null>(null);
-  const [isInitialized, setIsInitialized] = useState(false);
-  const [deviceId, setDeviceId] = useState('');
-  const [initError, setInitError] = useState('');
-  const [queuedCount, setQueuedCount] = useState(0);
+interface QueuedMessage {
+  message: Message;
+  attempts: number;
+}
 
+export default function BleScreen() {
+  // UI state
+  const [isScanning, setIsScanning] = useState(false);
+  const [devices, setDevices] = useState<{ id: string; name: string }[]>([]);
+  const [isAdvertising, setIsAdvertising] = useState(false);
+  const [messages, setMessages] = useState<string[]>([]);
+  const [deviceId, setDeviceId] = useState("");
+  const [messageInput, setMessageInput] = useState("");
+  const [seenCount, setSeenCount] = useState(0);
+  const [isAutoScanEnabled, setIsAutoScanEnabled] = useState(false);
+  const [queueLength, setQueueLength] = useState(0);
+
+  // Refs — always current in async/callbacks
+  const deviceIdRef = useRef("");
+  const seenMessages = useRef<Set<string>>(new Set());
+  const messageQueueRef = useRef<QueuedMessage[]>([]);
+  const isScanningRef = useRef(false);
+  const isConnectingRef = useRef(false);
+  const autoScanIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const scanTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const discoveredDevicesRef = useRef<Map<string, Device>>(new Map());
+
+  // Init device ID
   useEffect(() => {
-    initializeApp();
+    const id = `Device_${Math.random().toString(36).substr(2, 9)}`;
+    setDeviceId(id);
+    deviceIdRef.current = id;
   }, []);
 
-  /**
-   * Initialize all services in correct order
-   */
-  // ============================================================================
-// FIXED INITIALIZATION CODE FOR APP.TSX
-// Replace your initializeApp function with this
-// ============================================================================
+  // Event listener
+  useEffect(() => {
+    const emitter = new NativeEventEmitter(BleAdvertiser);
+    const sub = emitter.addListener("onMessageReceived", (event) => {
+      handleReceivedMessage(event.message, event.from);
+    });
+    return () => sub.remove();
+  }, []);
 
-const initializeApp = async () => {
-  try {
-    console.log('🚀 Starting app initialization...');
+  // Auto-scan
+  useEffect(() => {
+    if (isAutoScanEnabled) {
+      triggerScan();
+      autoScanIntervalRef.current = setInterval(() => {
+        triggerScan();
+      }, 6000);
+    }
+    return () => {
+      if (autoScanIntervalRef.current) {
+        clearInterval(autoScanIntervalRef.current);
+        autoScanIntervalRef.current = null;
+      }
+    };
+  }, [isAutoScanEnabled]);
 
-    // Step 1: Request permissions (Android)
-    if (Platform.OS === 'android') {
-      const permissionsGranted = await requestAndroidPermissions();
-      if (!permissionsGranted) {
-        setInitError('Permissions denied. Please grant all permissions.');
+  // Cleanup
+  useEffect(() => {
+    return () => {
+      manager.stopDeviceScan();
+      if (scanTimeoutRef.current) clearTimeout(scanTimeoutRef.current);
+      if (autoScanIntervalRef.current) clearInterval(autoScanIntervalRef.current);
+    };
+  }, []);
+
+  // Queue helpers
+  const syncQueue = (newQueue: QueuedMessage[]) => {
+    messageQueueRef.current = newQueue;
+    setQueueLength(newQueue.length);
+  };
+
+  const enqueue = (msg: Message) => {
+    const q = messageQueueRef.current;
+    if (q.some((item) => item.message.id === msg.id)) return;
+    syncQueue([...q, { message: msg, attempts: 0 }]);
+  };
+
+  const dequeue = (id: string) => {
+    syncQueue(messageQueueRef.current.filter((item) => item.message.id !== id));
+  };
+
+  // Handle received message
+  const handleReceivedMessage = (rawMessage: string, from: string) => {
+    try {
+      const message: Message = JSON.parse(rawMessage);
+
+      // Drop own messages
+      if (message.sender === deviceIdRef.current) {
+        console.log("🚫 Own message, ignoring");
         return;
       }
+
+      // Drop duplicates
+      if (seenMessages.current.has(message.id)) {
+        console.log("🔁 Duplicate ignored:", message.id);
+        return;
+      }
+
+      seenMessages.current.add(message.id);
+      setSeenCount(seenMessages.current.size);
+
+      setMessages((prev) => [
+        ...prev,
+        `📩 ${message.type} from ${message.sender}: "${message.content}" [Hops: ${message.hops}]`,
+      ]);
+
+      // Re-broadcast flood
+      if (message.type === MESSAGE_TYPE.FLOOD && message.ttl > 0) {
+        enqueue({
+          ...message,
+          ttl: message.ttl - 1,
+          hops: message.hops + 1,
+        });
+        console.log("🔄 Re-queued, TTL now", message.ttl - 1);
+      }
+    } catch (e: any) {
+      console.error("❌ Parse error:", e.message);
+      setMessages((prev) => [...prev, `📩 Raw: "${rawMessage}" from ${from}`]);
+    }
+  };
+
+  // Permissions
+  const requestPermissions = async (): Promise<boolean> => {
+    if (Platform.OS !== "android") return true;
+    const apiLevel = parseInt(Platform.Version.toString(), 10);
+
+    if (apiLevel < 31) {
+      const granted = await PermissionsAndroid.request(
+        PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION
+      );
+      return granted === PermissionsAndroid.RESULTS.GRANTED;
     }
 
-    // Step 2: Initialize database
-    console.log('📦 Initializing database...');
-    await DatabaseService.init();
-    console.log('✅ Database initialized');
+    const results = await PermissionsAndroid.requestMultiple([
+      PermissionsAndroid.PERMISSIONS.BLUETOOTH_ADVERTISE,
+      PermissionsAndroid.PERMISSIONS.BLUETOOTH_SCAN,
+      PermissionsAndroid.PERMISSIONS.BLUETOOTH_CONNECT,
+      PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
+    ]);
 
-    // Step 3: Initialize storage and get device ID
-    console.log('💾 Initializing storage...');
-    const settings = await StorageService.initUserSettings();
-    setDeviceId(settings.device_id);
-    console.log('✅ Storage initialized, Device ID:', settings.device_id);
-
-    // Step 4: Initialize BLE service
-    console.log('📡 Initializing BLE service...');
-    await BLEService.init();
-    console.log('✅ BLE service initialized');
-
-    // Step 5: Initialize mesh protocol
-    console.log('🌐 Initializing mesh protocol...');
-    await MeshProtocolService.init(settings.device_id);
-    console.log('✅ Mesh protocol initialized');
-
-    // Step 6: Start BLE advertising (FIXED - moved after MeshProtocol init)
-    console.log('📡 Starting BLE advertising...');
-    await BLEService.startAdvertising(
-      settings.device_id,  // ⭐ FIXED: Added comma
-      settings.username || `Mesh-${settings.device_id}`  // ⭐ FIXED: Added backticks for template literal
+    return [
+      "android.permission.BLUETOOTH_ADVERTISE",
+      "android.permission.BLUETOOTH_SCAN",
+      "android.permission.BLUETOOTH_CONNECT",
+      "android.permission.ACCESS_FINE_LOCATION",
+    ].every(
+      (p) => results[p as keyof typeof results] === PermissionsAndroid.RESULTS.GRANTED
     );
-    console.log('✅ BLE advertising started');
+  };
 
-    // Step 7: Initialize broadcast queue service
-    console.log('📥 Initializing broadcast queue...');
-    await BroadcastQueueService.init();
-    
-    // Subscribe to queue changes
-    BroadcastQueueService.onQueueChange((count) => {
-      setQueuedCount(count);
-      console.log('📊 Queue updated:', count, 'messages');
+  // Advertising
+  const startAdvertising = async () => {
+    try {
+      await BleAdvertiser.startAdvertising();
+      setIsAdvertising(true);
+    } catch (e: any) {
+      Alert.alert("BLE Error", e?.message ?? "Unknown error");
+    }
+  };
+
+  const stopAdvertising = async () => {
+    try {
+      await BleAdvertiser.stopAdvertising();
+      setIsAdvertising(false);
+    } catch (e: any) {
+      Alert.alert("BLE Error", e?.message ?? "Unknown error");
+    }
+  };
+
+  // Scan
+  const triggerScan = useCallback(async () => {
+    if (isScanningRef.current || isConnectingRef.current) {
+      console.log("⏭️ Scan skipped (busy)");
+      return;
+    }
+    if (messageQueueRef.current.length === 0) {
+      console.log("⏭️ Scan skipped (empty queue)");
+      return;
+    }
+
+    const allowed = await requestPermissions();
+    if (!allowed) return;
+
+    isScanningRef.current = true;
+    setIsScanning(true);
+    discoveredDevicesRef.current.clear();
+
+    console.log("🔍 Scan started");
+
+    manager.startDeviceScan([SERVICE_UUID], null, (error, device) => {
+      if (error) {
+        console.error("❌ Scan error:", error);
+        stopScan();
+        return;
+      }
+      if (!device) return;
+
+      const name = device.name || device.localName || "Unknown";
+      
+      // Store ALL discovered devices by ID
+      if (!discoveredDevicesRef.current.has(device.id)) {
+        discoveredDevicesRef.current.set(device.id, device);
+        console.log("📱 Found:", name, device.id);
+        
+        // Update UI
+        setDevices((prev) => {
+          const exists = prev.some(d => d.id === device.id);
+          if (exists) return prev;
+          return [...prev, { id: device.id, name }];
+        });
+      }
     });
-    console.log('✅ Broadcast queue initialized');
 
-    // ⭐ FIXED: Set initialized only once at the end
-    setIsInitialized(true);
-    console.log('🎉 App initialization complete!');
+    // Stop after 5s, then try sending to all discovered devices
+    scanTimeoutRef.current = setTimeout(() => {
+      stopScan();
+      
+      const foundDevices = Array.from(discoveredDevicesRef.current.values());
+      if (foundDevices.length > 0 && messageQueueRef.current.length > 0) {
+        console.log(`📤 Attempting to send to ${foundDevices.length} device(s)`);
+        sendToMultipleDevices(foundDevices);
+      }
+    }, 5000);
+  }, []);
 
-  } catch (error) {
-    console.error('❌ App initialization failed:', error);
-    setInitError(
-      error instanceof Error 
-        ? error.message 
-        : 'Failed to initialize app. Please restart.'
-    );
-    
-    Alert.alert(
-      'Initialization Error',
-      'Failed to initialize the app. Please restart and ensure all permissions are granted.',
-      [{ text: 'OK' }]
-    );
-  }
-};
+  const stopScan = () => {
+    manager.stopDeviceScan();
+    isScanningRef.current = false;
+    setIsScanning(false);
+    if (scanTimeoutRef.current) {
+      clearTimeout(scanTimeoutRef.current);
+      scanTimeoutRef.current = null;
+    }
+  };
 
-  /**
-   * Request Android permissions based on API level
-   */
-  const requestAndroidPermissions = async (): Promise<boolean> => {
-    if (Platform.OS !== 'android') return true;
+  // Send to multiple devices sequentially
+  const sendToMultipleDevices = async (deviceList: Device[]) => {
+    for (const device of deviceList) {
+      if (messageQueueRef.current.length === 0) {
+        console.log("✅ Queue empty, stopping sends");
+        break;
+      }
+      
+      await sendQueuedMessagesToDevice(device);
+      
+      // Small delay between device connections
+      await new Promise<void>(r => setTimeout(() => r(), 500));
+    }
+  };
+
+  // Send to one device
+  const sendQueuedMessagesToDevice = async (device: Device) => {
+    if (isConnectingRef.current) return;
+    if (messageQueueRef.current.length === 0) return;
+
+    isConnectingRef.current = true;
+    let connected: Device | null = null;
 
     try {
-      const apiLevel = Platform.Version as number;
-      console.log('📱 Android API Level:', apiLevel);
+      console.log("👉 Connecting to", device.name || device.id);
+      connected = await manager.connectToDevice(device.id, { timeout: 10000 });
+      console.log("✅ Connected");
 
-      if (apiLevel >= 31) {
-        // Android 12+ (API 31+)
-        console.log('🔐 Requesting Android 12+ permissions...');
-        const granted = await PermissionsAndroid.requestMultiple([
-          PermissionsAndroid.PERMISSIONS.BLUETOOTH_SCAN,
-          PermissionsAndroid.PERMISSIONS.BLUETOOTH_CONNECT,
-          PermissionsAndroid.PERMISSIONS.BLUETOOTH_ADVERTISE,
-          PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
-        ]);
-
-        const allGranted = Object.values(granted).every(
-          status => status === PermissionsAndroid.RESULTS.GRANTED
-        );
-
-        if (!allGranted) {
-          console.log('⚠️ Some permissions denied:', granted);
-          Alert.alert(
-            'Permissions Required',
-            'This app needs Bluetooth and Location permissions to discover and communicate with nearby devices.',
-            [{ text: 'OK' }]
-          );
-        }
-
-        return allGranted;
-      } else {
-        // Android 6-11 (API 23-30)
-        console.log('🔐 Requesting Android 6-11 permissions...');
-        const granted = await PermissionsAndroid.requestMultiple([
-          PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
-          PermissionsAndroid.PERMISSIONS.ACCESS_COARSE_LOCATION,
-        ]);
-
-        const allGranted = Object.values(granted).every(
-          status => status === PermissionsAndroid.RESULTS.GRANTED
-        );
-
-        if (!allGranted) {
-          console.log('⚠️ Location permissions denied');
-          Alert.alert(
-            'Permissions Required',
-            'This app needs Location permissions to scan for Bluetooth devices.',
-            [{ text: 'OK' }]
-          );
-        }
-
-        return allGranted;
+      try {
+        await connected.requestMTU(512);
+      } catch {
+        console.log("⚠️ MTU request failed");
       }
-    } catch (error) {
-      console.error('❌ Permission request failed:', error);
-      return false;
+
+      await connected.discoverAllServicesAndCharacteristics();
+
+      const snapshot = [...messageQueueRef.current];
+      let sent = 0;
+
+      for (const item of snapshot) {
+        try {
+          const payload = JSON.stringify(item.message);
+          const b64 = Buffer.from(payload).toString("base64");
+
+          await connected.writeCharacteristicWithResponseForService(
+            SERVICE_UUID,
+            CHAR_UUID,
+            b64
+          );
+
+          dequeue(item.message.id);
+          sent++;
+          console.log("✅ Sent:", item.message.id);
+
+          await new Promise<void>((r) => setTimeout(() => r(), 150));
+        } catch (e: any) {
+          console.error("❌ Write failed:", e.message);
+          break;
+        }
+      }
+
+      if (sent > 0) {
+        setMessages((prev) => [...prev, `📤 Sent ${sent} message(s) to ${device.name || device.id}`]);
+      }
+    } catch (e: any) {
+      console.error("❌ Connection error:", e.message);
+    } finally {
+      if (connected) {
+        try {
+          await connected.cancelConnection();
+        } catch {}
+      }
+      isConnectingRef.current = false;
     }
   };
 
-  /**
-   * Handle peer selection from NearbyPeersScreen
-   */
-  const handleSelectPeer = (peerId: string, peerName?: string) => {
-    console.log('👤 Selected peer:', peerId, peerName);
-    setChatInfo({ 
-      peerId, 
-      peerName: peerName || peerId 
-    });
-    setCurrentScreen('chat');
+  // Create messages
+  const createMessage = (content: string, type: string, ttl: number): Message => ({
+    id: `${deviceIdRef.current}_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`,
+    type,
+    content,
+    sender: deviceIdRef.current,
+    timestamp: Date.now(),
+    ttl,
+    hops: 0,
+  });
+
+  const sendChatMessage = () => {
+    if (!messageInput.trim()) return;
+    const msg = createMessage(messageInput.trim(), MESSAGE_TYPE.CHAT, 1);
+    enqueue(msg);
+    setMessages((prev) => [...prev, `📤 You (CHAT): "${msg.content}"`]);
+    setMessageInput("");
   };
 
-  /**
-   * Handle back navigation from chat
-   */
-  const handleBackFromChat = () => {
-    console.log('⬅️ Back from chat');
-    setChatInfo(null);
-    setCurrentScreen('peers');
+  const sendFloodMessage = () => {
+    if (!messageInput.trim()) return;
+    const msg = createMessage(messageInput.trim(), MESSAGE_TYPE.FLOOD, 5);
+    enqueue(msg);
+    setMessages((prev) => [...prev, `📤 You (FLOOD): "${msg.content}"`]);
+    setMessageInput("");
   };
 
-  /**
-   * Render navigation bar
-   */
-  const renderNavBar = () => (
-    <View style={styles.navbar}>
-      <TouchableOpacity
-        style={[styles.navItem, currentScreen === 'peers' && styles.navItemActive]}
-        onPress={() => {
-          setChatInfo(null);
-          setCurrentScreen('peers');
-        }}
-      >
-        <Text style={styles.navIcon}>👥</Text>
-        <Text style={styles.navText}>Peers</Text>
-      </TouchableOpacity>
+  // UI actions
+  const toggleAutoScan = () => setIsAutoScanEnabled((prev) => !prev);
 
-      <TouchableOpacity
-        style={[styles.navItem, currentScreen === 'broadcast' && styles.navItemActive]}
-        onPress={() => {
-          setChatInfo(null);
-          setCurrentScreen('broadcast');
-        }}
-      >
-        <Text style={styles.navIcon}>📢</Text>
-        <Text style={styles.navText}>Broadcast</Text>
-        {queuedCount > 0 && (
-          <View style={styles.badge}>
-            <Text style={styles.badgeText}>{queuedCount}</Text>
-          </View>
-        )}
-      </TouchableOpacity>
-    </View>
-  );
+  const clearQueue = () => syncQueue([]);
 
-  /**
-   * Render current screen
-   */
-  const renderScreen = () => {
-    // Show error state
-    if (initError) {
-      return (
-        <View style={styles.errorContainer}>
-          <Text style={styles.errorIcon}>❌</Text>
-          <Text style={styles.errorTitle}>Initialization Failed</Text>
-          <Text style={styles.errorMessage}>{initError}</Text>
-          <TouchableOpacity 
-            style={styles.retryButton}
-            onPress={() => {
-              setInitError('');
-              setIsInitialized(false);
-              initializeApp();
-            }}
-          >
-            <Text style={styles.retryButtonText}>Retry</Text>
-          </TouchableOpacity>
-        </View>
-      );
-    }
+  const clearSeenMessages = () => {
+    seenMessages.current.clear();
+    setSeenCount(0);
+  };
 
-    // Show loading state
-    if (!isInitialized) {
-      return (
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#4A90E2" />
-          <Text style={styles.loadingText}>Initializing Mesh Network...</Text>
-          {deviceId && (
-            <Text style={styles.deviceIdText}>Device ID: {deviceId}</Text>
-          )}
-          <View style={styles.stepsContainer}>
-            <Text style={styles.stepText}>• Initializing database</Text>
-            <Text style={styles.stepText}>• Setting up Bluetooth</Text>
-            <Text style={styles.stepText}>• Starting mesh protocol</Text>
-            <Text style={styles.stepText}>• Preparing broadcast queue</Text>
-          </View>
-        </View>
-      );
-    }
-
-    // Render active screen
-    switch (currentScreen) {
-      case 'peers':
-        return (
-          <NearbyPeersScreen onSelectPeer={handleSelectPeer} />
-
-        );
-
-      case 'chat':
-  return chatInfo ? (
-    <ChatScreen
-      peerId={chatInfo.peerId}
-      peerName={chatInfo.peerName}
-      onBack={handleBackFromChat}
-    />
-  ) : (
-    <View style={styles.errorContainer}>
-      <Text style={styles.errorMessage}>No chat selected</Text>
-      <TouchableOpacity 
-        style={styles.retryButton}
-        onPress={() => setCurrentScreen('peers')}
-      >
-        <Text style={styles.retryButtonText}>Go to Peers</Text>
-      </TouchableOpacity>
-    </View>
-  );
-
-
-      case 'broadcast':
-        return <BroadcastScreen />;
-
-      default:
-        return null;
-    }
+  const clearDevices = () => {
+    setDevices([]);
+    discoveredDevicesRef.current.clear();
   };
 
   return (
     <View style={styles.container}>
-      {renderScreen()}
-      {isInitialized && !initError && renderNavBar()}
+      <ScrollView contentContainerStyle={styles.scrollContent}>
+        <Text style={styles.title}>BLE Mesh Chat</Text>
+        <Text style={styles.deviceIdText}>ID: {deviceId}</Text>
+
+        <View style={styles.buttonRow}>
+          <Button title="Request Permissions" onPress={requestPermissions} />
+        </View>
+
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Receiver Mode</Text>
+          <View style={styles.buttonRow}>
+            <Button
+              title="Start Advertising"
+              onPress={startAdvertising}
+              disabled={isAdvertising}
+              color={isAdvertising ? "gray" : "#4CAF50"}
+            />
+            <View style={{ width: 10 }} />
+            <Button
+              title="Stop Advertising"
+              onPress={stopAdvertising}
+              disabled={!isAdvertising}
+              color={!isAdvertising ? "gray" : "#F44336"}
+            />
+          </View>
+          {isAdvertising && <Text style={styles.statusText}>🟢 Advertising</Text>}
+        </View>
+
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Send Message</Text>
+          <TextInput
+            style={styles.input}
+            placeholder="Type your message..."
+            value={messageInput}
+            onChangeText={setMessageInput}
+            multiline
+          />
+          <View style={styles.buttonRow}>
+            <TouchableOpacity
+              onPress={sendChatMessage}
+              style={[styles.sendButton, { backgroundColor: "#3B82F6" }]}
+            >
+              <Text style={styles.buttonText}>Send Chat</Text>
+            </TouchableOpacity>
+            <View style={{ width: 10 }} />
+            <TouchableOpacity
+              onPress={sendFloodMessage}
+              style={[styles.sendButton, { backgroundColor: "#8B5CF6" }]}
+            >
+              <Text style={styles.buttonText}>Flood Network</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Network Control</Text>
+          <View style={styles.buttonRow}>
+            <TouchableOpacity
+              onPress={toggleAutoScan}
+              style={[
+                styles.controlButton,
+                { backgroundColor: isAutoScanEnabled ? "#10B981" : "#6B7280" },
+              ]}
+            >
+              <Text style={styles.buttonText}>
+                Auto-Scan: {isAutoScanEnabled ? "ON" : "OFF"}
+              </Text>
+            </TouchableOpacity>
+          </View>
+          <Text style={styles.infoText}>
+            Queue: {queueLength} | Seen: {seenCount} | {isScanning ? "Scanning..." : "Idle"}
+          </Text>
+          <View style={styles.buttonRow}>
+            <Button title="Clear Queue" onPress={clearQueue} color="#EF4444" />
+            <View style={{ width: 10 }} />
+            <Button title="Clear Cache" onPress={clearSeenMessages} color="#F59E0B" />
+          </View>
+        </View>
+
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Discovered Devices ({devices.length})</Text>
+          <Button title="Clear Device List" onPress={clearDevices} color="#6B7280" />
+          <View style={styles.resultsBox}>
+            {devices.length === 0 ? (
+              <Text style={styles.placeholder}>
+                {isScanning ? "Scanning..." : "No devices found"}
+              </Text>
+            ) : (
+              <ScrollView style={{ flex: 1 }} nestedScrollEnabled>
+                {devices.map((item) => (
+                  <View key={item.id} style={styles.deviceItem}>
+                    <Text style={styles.deviceName}>{item.name}</Text>
+                    <Text style={styles.deviceAddr}>{item.id.substring(0, 20)}</Text>
+                  </View>
+                ))}
+              </ScrollView>
+            )}
+          </View>
+        </View>
+
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Message Log</Text>
+          <View style={styles.messagesBox}>
+            {messages.length === 0 ? (
+              <Text style={styles.placeholder}>No messages yet</Text>
+            ) : (
+              <ScrollView style={{ flex: 1 }} nestedScrollEnabled>
+                {messages.map((msg, idx) => (
+                  <Text key={idx} style={styles.messageText}>
+                    {msg}
+                  </Text>
+                ))}
+              </ScrollView>
+            )}
+          </View>
+        </View>
+      </ScrollView>
     </View>
   );
-};
+}
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#f5f5f5',
-  },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: '#f5f5f5',
-    padding: 20,
-  },
-  loadingText: {
-    fontSize: 20,
-    fontWeight: '600',
-    color: '#333',
-    marginTop: 16,
-    marginBottom: 8,
-  },
-  deviceIdText: {
-    fontSize: 14,
-    color: '#666',
-    marginTop: 8,
-  },
-  stepsContainer: {
-    marginTop: 24,
-    alignItems: 'flex-start',
-  },
-  stepText: {
-    fontSize: 13,
-    color: '#999',
-    marginVertical: 4,
-  },
-  errorContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: '#f5f5f5',
-    padding: 32,
-  },
-  errorIcon: {
-    fontSize: 64,
-    marginBottom: 16,
-  },
-  errorTitle: {
-    fontSize: 20,
-    fontWeight: '600',
-    color: '#FF5252',
-    marginBottom: 8,
-  },
-  errorMessage: {
-    fontSize: 14,
-    color: '#666',
-    textAlign: 'center',
-    marginBottom: 24,
-    lineHeight: 20,
-  },
-  retryButton: {
-    backgroundColor: '#4A90E2',
-    paddingHorizontal: 32,
-    paddingVertical: 12,
-    borderRadius: 24,
-  },
-  retryButtonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  navbar: {
-    flexDirection: 'row',
-    backgroundColor: '#fff',
-    borderTopWidth: 1,
-    borderTopColor: '#e0e0e0',
-    paddingBottom: Platform.OS === 'ios' ? 20 : 0,
-    elevation: 8,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: -2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-  },
-  navItem: {
-    flex: 1,
-    alignItems: 'center',
-    paddingVertical: 12,
-    position: 'relative',
-  },
-  navItemActive: {
-    backgroundColor: '#f0f0f0',
-    borderTopWidth: 2,
-    borderTopColor: '#4A90E2',
-  },
-  navIcon: {
-    fontSize: 24,
-    marginBottom: 4,
-  },
-  navText: {
-    fontSize: 12,
-    color: '#666',
-    fontWeight: '500',
-  },
-  badge: {
-    position: 'absolute',
-    top: 6,
-    right: '30%',
-    backgroundColor: '#FF5252',
+  container: { flex: 1, backgroundColor: "#fff" },
+  scrollContent: { flexGrow: 1, paddingHorizontal: 20, paddingVertical: 40 },
+  title: { fontSize: 28, fontWeight: "700", marginBottom: 4, textAlign: "center", color: "#333" },
+  deviceIdText: { fontSize: 12, color: "#999", textAlign: "center", marginBottom: 20 },
+  section: { marginBottom: 20 },
+  sectionTitle: { fontSize: 18, fontWeight: "600", marginBottom: 10, color: "#555" },
+  buttonRow: { flexDirection: "row", justifyContent: "center", marginBottom: 10 },
+  statusText: { textAlign: "center", marginTop: 4, fontSize: 14, color: "#4CAF50" },
+  infoText: { textAlign: "center", marginVertical: 8, fontSize: 14, color: "#666" },
+  input: {
+    borderWidth: 1,
+    borderColor: "#ccc",
     borderRadius: 10,
-    minWidth: 20,
-    height: 20,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 6,
+    padding: 12,
+    fontSize: 16,
+    minHeight: 50,
+    marginBottom: 10,
   },
-  badgeText: {
-    color: '#fff',
-    fontSize: 11,
-    fontWeight: 'bold',
+  sendButton: { flex: 1, padding: 14, borderRadius: 10, alignItems: "center" },
+  controlButton: { flex: 1, padding: 14, borderRadius: 10, alignItems: "center" },
+  buttonText: { color: "white", fontSize: 16, fontWeight: "600" },
+  resultsBox: {
+    height: 180,
+    borderWidth: 1,
+    borderColor: "#ccc",
+    borderRadius: 10,
+    padding: 10,
+    marginTop: 10,
+  },
+  placeholder: { color: "#999", fontSize: 16, textAlign: "center", marginTop: 60 },
+  deviceItem: {
+    padding: 12,
+    backgroundColor: "#f2f2f2",
+    borderRadius: 8,
+    marginBottom: 8,
+    borderLeftWidth: 4,
+    borderLeftColor: "#3B82F6",
+  },
+  deviceName: { fontSize: 14, fontWeight: "600", color: "#333" },
+  deviceAddr: { fontSize: 11, color: "#999", marginTop: 2 },
+  messagesBox: {
+    height: 200,
+    borderWidth: 1,
+    borderColor: "#ccc",
+    borderRadius: 10,
+    padding: 10,
+    backgroundColor: "#f9f9f9",
+  },
+  messageText: {
+    fontSize: 12,
+    color: "#333",
+    marginBottom: 6,
+    paddingVertical: 5,
+    paddingHorizontal: 10,
+    backgroundColor: "#fff",
+    borderRadius: 5,
   },
 });
-
-export default App;
