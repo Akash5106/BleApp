@@ -189,9 +189,11 @@ class MeshProtocolService {
   // NEIGHBORS
   // =========================================================================
   private updateNeighborCache(srcId: string): void {
+    const existing = this.neighborCache.get(srcId);
     this.neighborCache.set(srcId, {
       src_id: srcId,
       lastSeenTime: Date.now(),
+      rssi: existing?.rssi,
     });
 
     if (this.neighborCache.size > MESH_CONFIG.NEIGHBOR_CACHE_MAX) {
@@ -205,8 +207,13 @@ class MeshProtocolService {
   }
 
   // 🔥 NEW: physical neighbor update (scanner-only fix)
-  updatePhysicalNeighbor(deviceId: string): void {
-    this.updateNeighborCache(deviceId);
+  updatePhysicalNeighbor(deviceId: string,rssi?:number): void {
+    this.neighborCache.set(deviceId, {
+    src_id: deviceId,
+    lastSeenTime: Date.now(),
+    rssi,
+  });
+    this.notifyNeighborListeners();
   }
 
   getActiveNeighbors(): NeighborEntry[] {

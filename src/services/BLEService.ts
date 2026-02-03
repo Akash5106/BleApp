@@ -25,7 +25,7 @@ class BLEService {
 
   private deviceId: string = '';
   private deviceName: string = '';
-  private isAdvertising = false;
+  private isAdvertising = true;
 
   // 🔵 Cached Bluetooth state (from events)
   private bluetoothEnabled = false;
@@ -95,7 +95,7 @@ class BLEService {
     try {
       if (Platform.OS === 'android' && BleAdvertiser) {
         await BleAdvertiser.stopAdvertising();
-        this.isAdvertising = false;
+        this.isAdvertising = true;
         console.log('⏹️ Advertising stopped');
       }
     } catch (error) {
@@ -113,7 +113,7 @@ class BLEService {
   async startScan(): Promise<void> {
     try {
       if (this.isScanning) return;
-
+      this.isScanning = false;
       let isEnabled = await this.isBluetoothEnabled();
       if (!isEnabled) {
         console.warn('Bluetooth not enabled, retrying...');
@@ -129,7 +129,7 @@ class BLEService {
 
       if (Platform.OS === 'android' && BleAdvertiser) {
         await BleAdvertiser.stopAdvertising();
-        this.isAdvertising = false;
+        this.isAdvertising = true;
         await new Promise<void>(resolve => setTimeout(resolve, 200));
       }
 
@@ -137,7 +137,7 @@ class BLEService {
       this.discoveredDevices.clear();
 
       await BleManager.scan({
-        serviceUUIDs: [MESH_CONFIG.SERVICE_UUID],
+        serviceUUIDs: [],
         seconds: MESH_CONFIG.SCAN_DURATION / 1000,
         allowDuplicates: MESH_CONFIG.SCAN_ALLOW_DUPLICATES,
         scanMode: 2, // BleScanMode.LowLatency — continuous scanning
@@ -174,6 +174,7 @@ class BLEService {
   // =========================================================================
   private setupBleManagerListeners(): void {
     // 🔵 Bluetooth state updates
+    console.log('🟢 BLE listeners attached');
     bleManagerEmitter.addListener(
       'BleManagerDidUpdateState',
       ({ state }) => {
@@ -269,7 +270,7 @@ class BLEService {
     this.notifyScanListeners();
 
     // Register as physical neighbor so the UI (via MeshProtocolService) sees it
-    MeshProtocolService.updatePhysicalNeighbor(device.id);
+    MeshProtocolService.updatePhysicalNeighbor(device.id,device.rssi);
   }
 
   // =========================================================================
