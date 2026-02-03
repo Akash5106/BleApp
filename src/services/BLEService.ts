@@ -38,20 +38,24 @@ class BLEService {
       console.log('🚀 Initializing BLE Service...');
 
       await BleManager.start({ showAlert: false });
-      await BleManager.checkState();
       console.log('✅ BLE Manager started');
+
+      // Register listeners BEFORE checkState so we catch the state event
+      this.setupBleManagerListeners();
+      this.setupAdvertiserListeners();
+
+      const initialState = await BleManager.checkState();
+      this.bluetoothEnabled = initialState === 'on';
 
       if (Platform.OS === 'android') {
         try {
           await BleManager.enableBluetooth();
+          this.bluetoothEnabled = true;
           console.log('✅ Bluetooth enabled');
         } catch {
           console.log('⚠️ Bluetooth already enabled or user denied');
         }
       }
-
-      this.setupBleManagerListeners();
-      this.setupAdvertiserListeners();
 
       console.log('✅ BLE Service initialized');
     } catch (error) {
@@ -110,17 +114,22 @@ class BLEService {
     try {
       if (this.isScanning) return;
 
-      const isEnabled = await this.isBluetoothEnabled();
+      let isEnabled = await this.isBluetoothEnabled();
       if (!isEnabled) {
         console.warn('Bluetooth not enabled, retrying...');
-        await BleManager.checkState();
-        await new Promise<void>((resolve) => setTimeout(resolve, 100));
+        const state = await BleManager.checkState();
+        this.bluetoothEnabled = state === 'on';
+        isEnabled = this.bluetoothEnabled;
       }
 
-      if (!this.bluetoothEnabled) return;
+      if (!isEnabled) {
+        console.warn('⚠️ Bluetooth still not enabled, aborting scan');
+        return;
+      }
 
       if (Platform.OS === 'android' && BleAdvertiser) {
         await BleAdvertiser.stopAdvertising();
+        this.isAdvertising = false;
         await new Promise<void>(resolve => setTimeout(resolve, 200));
       }
 
@@ -131,13 +140,18 @@ class BLEService {
         serviceUUIDs: [MESH_CONFIG.SERVICE_UUID],
         seconds: MESH_CONFIG.SCAN_DURATION / 1000,
         allowDuplicates: MESH_CONFIG.SCAN_ALLOW_DUPLICATES,
+        scanMode: 2, // BleScanMode.LowLatency — continuous scanning
       });
 
       setTimeout(async () => {
-        if (!this.isScanning&&!this.isAdvertising){
-          await this.startAdvertising(this.deviceId, this.deviceName);
+        if (!this.isScanning && !this.isAdvertising) {
+          try {
+            await this.startAdvertising(this.deviceId, this.deviceName);
+          } catch (e) {
+            console.error('❌ Failed to restart advertising after scan:', e);
+          }
         }
-      }, MESH_CONFIG.SCAN_DURATION + 100);
+      }, MESH_CONFIG.SCAN_DURATION + 500);
 
     } catch (error) {
       console.error('❌ Root Scan Error:', error);
@@ -191,7 +205,6 @@ class BLEService {
     // 🛑 Scan stopped
     bleManagerEmitter.addListener('BleManagerStopScan', () => {
       this.isScanning = false;
-      this.isAdvertising=false;
       console.log('🔍 Scan completed');
     });
 
@@ -209,8 +222,8 @@ class BLEService {
 
     bleAdvertiserEmitter.addListener('onPacketReceived', (event) => {
       try {
-        const packet: MeshPacket = JSON.parse(event.packet);
-        console.log('📦 Packet received from native:', packet.msg_id);
+        const packet: MeshPacket = JSON.parse(event.message);
+        console.log('📦 Packet received from native:', packet.msg_id, 'from:', event.from);
         MeshProtocolService.onPacketReceived(packet);
       } catch (error) {
         console.error('❌ Error parsing packet:', error);
@@ -254,6 +267,9 @@ class BLEService {
 
     this.discoveredDevices.set(device.id, bleDevice);
     this.notifyScanListeners();
+
+    // Register as physical neighbor so the UI (via MeshProtocolService) sees it
+    MeshProtocolService.updatePhysicalNeighbor(device.id);
   }
 
   // =========================================================================
@@ -316,16 +332,16 @@ class BLEService {
   }
 
   async isBluetoothEnabled(): Promise<boolean> {
-  if (this.bluetoothEnabled) return true;
+    if (this.bluetoothEnabled) return true;
 
-  try {
-      await BleManager.checkState();
-      await new Promise<void>((resolve) => setTimeout(resolve, 100));
+    try {
+      const state = await BleManager.checkState();
+      this.bluetoothEnabled = state === 'on';
       return this.bluetoothEnabled;
-  } catch {
-    return false;
+    } catch {
+      return false;
+    }
   }
-}
 
 
   async getConnectedDevices(): Promise<any[]> {

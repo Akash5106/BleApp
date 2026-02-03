@@ -13,8 +13,8 @@ export const MESH_CONFIG = {
   SEEN_MESSAGES_MAX: 1000,              // Max entries in LRU cache
   SEEN_MESSAGE_TTL: 60000,              // 60 seconds
   NEIGHBOR_CACHE_MAX: 100,              // Max neighbors to track
-  NEIGHBOR_EXPIRY: 10000,               // 10 seconds
-  NEIGHBOR_ACTIVE_THRESHOLD: 5000,      // 5 seconds for "active" status
+  NEIGHBOR_EXPIRY: 30000,               // 30 seconds
+  NEIGHBOR_ACTIVE_THRESHOLD: 30000,     // Match NEIGHBOR_EXPIRY for "active" status
   
   // Forwarding settings
   FORWARDING_JITTER_MIN: 50,            // ms
@@ -28,8 +28,10 @@ export const MESH_CONFIG = {
   ADAPTIVE_TTL_THRESHOLD: 3,            // Neighbor count for adaptation
   
   // Scanning settings
-  SCAN_DURATION: 5000,                  // 5 seconds
+  SCAN_DURATION: 12000,                  // 12 seconds
   SCAN_ALLOW_DUPLICATES: true,
+  SCAN_WINDOW: 4000,
+  ADVERTISE_WINDOW: 2000,
   
   // Database settings
   MESSAGE_RETENTION_DAYS: 7,            // Keep messages for 7 days

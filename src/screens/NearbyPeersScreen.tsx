@@ -21,7 +21,7 @@ import { EmptyState } from '../components/EmptyState';
 import { useMeshProtocol } from '../hooks/useMeshProtocol';
 import { useBlePermissions } from '../hooks/useBlePermissions';
 import BLEService from '../services/BLEService';
-import { COLORS } from '../constants';
+import { COLORS, MESH_CONFIG } from '../constants';
 
 interface NearbyPeersScreenProps {
   onSelectPeer: (peerId: string, peerName: string) => void;
@@ -76,7 +76,7 @@ export const NearbyPeersScreen: React.FC<NearbyPeersScreenProps> = ({
       scanTimeoutRef.current = setTimeout(() => {
         scanningRef.current = false;
         setIsScanning(false);
-      }, 5000);
+      }, MESH_CONFIG.SCAN_DURATION + 500);
     } catch (error) {
       console.error('❌ Failed to start scanning:', error);
       scanningRef.current = false;
