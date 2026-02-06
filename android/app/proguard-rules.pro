@@ -12,3 +12,21 @@
 -keep class com.facebook.react.turbomodule.** { *; }
 
 # Add any project specific keep options here:
+
+# react-native-ble-manager
+-keep class it.innove.** { *; }
+
+# react-native-ble-plx
+-keep class com.bleplx.** { *; }
+-keep class com.polidea.rxandroidble2.** { *; }
+
+# react-native-sqlite-storage
+-keep class org.pgsqlite.** { *; }
+
+# Custom native BLE advertiser module
+-keep class com.anonymous.bleapp.BleAdvertiserModule { *; }
+-keep class com.anonymous.bleapp.BleAdvertiserPackage { *; }
+
+# Hermes
+-keep class com.facebook.hermes.unicode.** { *; }
+-keep class com.facebook.jni.** { *; }

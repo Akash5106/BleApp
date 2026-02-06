@@ -18,15 +18,16 @@ class DatabaseService {
    */
   async init(): Promise<void> {
     try {
+      console.log('[DB] init() — opening database:', MESH_CONFIG.DB_NAME);
       this.db = await SQLite.openDatabase({
         name: MESH_CONFIG.DB_NAME,
         location: 'default',
       });
 
       await this.createTables();
-      console.log('✅ Database initialized');
+      console.log('[DB] Database initialized successfully');
     } catch (error) {
-      console.error('❌ Database init failed:', error);
+      console.error('[DB] Database init failed:', error);
       throw error;
     }
   }
@@ -35,6 +36,7 @@ class DatabaseService {
    * Create messages table with indexes
    */
   private async createTables(): Promise<void> {
+  console.log('[DB] createTables() — creating messages table + indexes');
   if (!this.db) return;
 
   await this.db.executeSql(`
@@ -73,6 +75,7 @@ class DatabaseService {
     `;
 
     try {
+      console.log('[DB] saveMessage() — msg_id:', message.msg_id, '| src:', message.src_id, '| dest:', message.dest_id);
       await this.db?.executeSql(query, [
         message.msg_id,
         message.src_id,
@@ -82,8 +85,9 @@ class DatabaseService {
         message.timestamp,
         message.ui_state,
       ]);
+      console.log('[DB] Message saved:', message.msg_id);
     } catch (error) {
-      console.error('❌ Failed to save message:', error);
+      console.error('[DB] Failed to save message:', error);
       throw error;
     }
   }
@@ -92,6 +96,7 @@ class DatabaseService {
    * Get all messages for a specific destination (chat history + broadcasts)
    */
   async getMessages(destId: string): Promise<StoredMessage[]> {
+    console.log('[DB] getMessages() — destId:', destId);
     const query = `
       SELECT * FROM messages
       WHERE dest_id = ? OR dest_id = ?
@@ -109,9 +114,10 @@ class DatabaseService {
         messages.push(results.rows.item(i));
       }
 
+      console.log('[DB] getMessages() returned', messages.length, 'messages');
       return messages;
     } catch (error) {
-      console.error('❌ Failed to get messages:', error);
+      console.error('[DB] Failed to get messages:', error);
       return [];
     }
   }
@@ -123,6 +129,7 @@ class DatabaseService {
     deviceId1: string,
     deviceId2: string
   ): Promise<StoredMessage[]> {
+    console.log('[DB] getChatMessages() — between:', deviceId1, 'and', deviceId2);
     const query = `
       SELECT * FROM messages
       WHERE (src_id = ? AND dest_id = ?)
@@ -143,9 +150,10 @@ class DatabaseService {
         messages.push(results.rows.item(i));
       }
 
+      console.log('[DB] getChatMessages() returned', messages.length, 'messages');
       return messages;
     } catch (error) {
-      console.error('❌ Failed to get chat messages:', error);
+      console.error('[DB] Failed to get chat messages:', error);
       return [];
     }
   }
@@ -154,6 +162,7 @@ class DatabaseService {
    * Get broadcast messages
    */
   async getBroadcastMessages(): Promise<StoredMessage[]> {
+    console.log('[DB] getBroadcastMessages()');
     const query = `
       SELECT * FROM messages
       WHERE dest_id = ?
@@ -171,9 +180,10 @@ class DatabaseService {
         messages.push(results.rows.item(i));
       }
 
+      console.log('[DB] getBroadcastMessages() returned', messages.length, 'broadcasts');
       return messages;
     } catch (error) {
-      console.error('❌ Failed to get broadcast messages:', error);
+      console.error('[DB] Failed to get broadcast messages:', error);
       return [];
     }
   }
@@ -188,9 +198,10 @@ class DatabaseService {
     const query = `UPDATE messages SET ui_state = ? WHERE msg_id = ?`;
 
     try {
+      console.log('[DB] updateMessageState() — msgId:', msgId, '| newState:', state);
       await this.db?.executeSql(query, [state, msgId]);
     } catch (error) {
-      console.error('❌ Failed to update message state:', error);
+      console.error('[DB] Failed to update message state:', error);
     }
   }
 
@@ -206,10 +217,11 @@ class DatabaseService {
     const query = `DELETE FROM messages WHERE timestamp < ?`;
 
     try {
+      console.log('[DB] cleanOldMessages() — cutoff:', new Date(cutoffTime).toISOString());
       await this.db?.executeSql(query, [cutoffTime]);
-      console.log('🧹 Cleaned old messages');
+      console.log('[DB] Cleaned old messages');
     } catch (error) {
-      console.error('❌ Failed to clean old messages:', error);
+      console.error('[DB] Failed to clean old messages:', error);
     }
   }
 
@@ -221,9 +233,11 @@ class DatabaseService {
 
     try {
       const [results] = await this.db!.executeSql(query);
-      return results.rows.item(0).count;
+      const count = results.rows.item(0).count;
+      console.log('[DB] getMessageCount():', count);
+      return count;
     } catch (error) {
-      console.error('❌ Failed to get message count:', error);
+      console.error('[DB] Failed to get message count:', error);
       return 0;
     }
   }
@@ -236,9 +250,9 @@ class DatabaseService {
 
     try {
       await this.db?.executeSql(query);
-      console.log('🧹 Cleared all messages');
+      console.log('[DB] Cleared all messages');
     } catch (error) {
-      console.error('❌ Failed to clear messages:', error);
+      console.error('[DB] Failed to clear messages:', error);
     }
   }
 
@@ -249,9 +263,9 @@ class DatabaseService {
     try {
       await this.db?.close();
       this.db = null;
-      console.log('✅ Database closed');
+      console.log('[DB] Database closed');
     } catch (error) {
-      console.error('❌ Failed to close database:', error);
+      console.error('[DB] Failed to close database:', error);
     }
   }
 }

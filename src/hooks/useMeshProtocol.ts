@@ -40,9 +40,11 @@ export const useMeshProtocol = () => {
   // SUBSCRIPTIONS
   // =========================================================================
   useEffect(() => {
+    console.log('[HOOK] useMeshProtocol — setting up subscriptions');
     // -------- Neighbors --------
     const unsubscribeNeighbors =
       MeshProtocolService.onNeighborsChange(newNeighbors => {
+        console.log('[HOOK] Neighbors updated — count:', newNeighbors.length);
         const mapped: Neighbor[] = newNeighbors.map(n => ({
           deviceId: n.src_id,
           lastSeen: n.lastSeenTime,
@@ -57,6 +59,7 @@ export const useMeshProtocol = () => {
     // -------- Messages --------
     const unsubscribeMessages =
       MeshProtocolService.onMessage(message => {
+        console.log('[HOOK] Message received — msg_id:', message.msg_id, '| src:', message.src_id, '| dest:', message.dest_id);
         const meshMessage: MeshMessage = {
           id: message.msg_id,
           senderId: message.src_id,
@@ -74,10 +77,12 @@ export const useMeshProtocol = () => {
 
         setMessages(prev => {
           if (seenMessageIds.current.has(meshMessage.id)) {
+            console.log('[HOOK] Duplicate message skipped:', meshMessage.id);
             return prev;
           }
 
           seenMessageIds.current.add(meshMessage.id);
+          console.log('[HOOK] Message added to state — total:', prev.length + 1);
 
           const updated = [...prev, meshMessage];
           return updated.length > 500
@@ -89,6 +94,7 @@ export const useMeshProtocol = () => {
     setIsSubscribed(true);
 
     return () => {
+      console.log('[HOOK] useMeshProtocol — cleaning up subscriptions');
       unsubscribeNeighbors();
       unsubscribeMessages();
       seenMessageIds.current.clear();
@@ -100,6 +106,7 @@ export const useMeshProtocol = () => {
   // =========================================================================
   const sendChatMessage = useCallback(
     async (destId: string, message: string): Promise<string> => {
+      console.log('[HOOK] sendChatMessage() — dest:', destId, '| len:', message.length);
       return MeshProtocolService.sendChatMessage(destId, message);
     },
     []
@@ -107,6 +114,7 @@ export const useMeshProtocol = () => {
 
   const sendBroadcast = useCallback(
     async (message: string, isEmergency = false): Promise<string> => {
+      console.log('[HOOK] sendBroadcast() — emergency:', isEmergency, '| len:', message.length);
       return MeshProtocolService.sendBroadcastMessage(
         message,
         isEmergency

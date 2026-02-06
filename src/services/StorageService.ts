@@ -27,6 +27,7 @@ class StorageService {
    * Initialize user settings if not present
    */
   async initUserSettings(): Promise<UserSettings> {
+    console.log('[STORAGE] initUserSettings() — checking for existing settings');
     let settings = await this.getUserSettings();
 
     if (!settings) {
@@ -37,7 +38,9 @@ class StorageService {
       };
 
       await this.saveUserSettings(settings);
-      console.log('✅ Created user settings:', settings.device_id);
+      console.log('[STORAGE] Created new user settings — device_id:', settings.device_id, '| username:', settings.username);
+    } else {
+      console.log('[STORAGE] Existing settings found — device_id:', settings.device_id);
     }
 
     return settings;
@@ -53,9 +56,11 @@ class StorageService {
   async getUserSettings(): Promise<UserSettings | null> {
     try {
       const data = await AsyncStorage.getItem(KEYS.USER_SETTINGS);
-      return data ? (JSON.parse(data) as UserSettings) : null;
+      const settings = data ? (JSON.parse(data) as UserSettings) : null;
+      console.log('[STORAGE] getUserSettings() —', settings ? 'found' : 'not found');
+      return settings;
     } catch (error) {
-      console.error('❌ Failed to get user settings:', error);
+      console.error('[STORAGE] Failed to get user settings:', error);
       return null;
     }
   }
@@ -69,8 +74,9 @@ class StorageService {
         KEYS.USER_SETTINGS,
         JSON.stringify(settings)
       );
+      console.log('[STORAGE] saveUserSettings() — saved for device_id:', settings.device_id);
     } catch (error) {
-      console.error('❌ Failed to save user settings:', error);
+      console.error('[STORAGE] Failed to save user settings:', error);
     }
   }
 
@@ -82,11 +88,16 @@ class StorageService {
    * Update username
    */
   async updateUsername(username: string): Promise<void> {
+    console.log('[STORAGE] updateUsername() — new username:', username);
     const settings = await this.getUserSettings();
-    if (!settings) return;
+    if (!settings) {
+      console.warn('[STORAGE] updateUsername() — no settings found, skipping');
+      return;
+    }
 
     settings.username = username;
     await this.saveUserSettings(settings);
+    console.log('[STORAGE] Username updated successfully');
   }
 
   /**
@@ -95,10 +106,10 @@ class StorageService {
   async getDeviceId(): Promise<string> {
     const settings = await this.getUserSettings();
     if (!settings) {
-      // If we reach here after initialization, something is wrong.
-      // Don't generate a new one; throw an error or return an empty string.
+      console.error('[STORAGE] getDeviceId() — storage not initialized!');
       throw new Error("Storage not initialized");
     }
+    console.log('[STORAGE] getDeviceId() —', settings.device_id);
     return settings.device_id;
   }
 
@@ -111,10 +122,11 @@ class StorageService {
    */
   async clearAll(): Promise<void> {
     try {
+      console.log('[STORAGE] clearAll() — clearing AsyncStorage');
       await AsyncStorage.clear();
-      console.log('🧹 Storage cleared');
+      console.log('[STORAGE] Storage cleared successfully');
     } catch (error) {
-      console.error('❌ Failed to clear storage:', error);
+      console.error('[STORAGE] Failed to clear storage:', error);
     }
   }
 }

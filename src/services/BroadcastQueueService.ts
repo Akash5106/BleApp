@@ -24,11 +24,12 @@ class BroadcastQueueService {
    */
   async init(): Promise<void> {
     try {
+      console.log('[QUEUE] init() — loading queue from storage');
       await this.loadQueue();
       this.startProcessing();
-      console.log('✅ BroadcastQueueService initialized');
+      console.log('[QUEUE] BroadcastQueueService initialized — queueSize:', this.queue.length);
     } catch (error) {
-      console.error('❌ Failed to initialize BroadcastQueueService:', error);
+      console.error('[QUEUE] Failed to initialize BroadcastQueueService:', error);
     }
   }
 
@@ -36,6 +37,7 @@ class BroadcastQueueService {
    * Start background processing
    */
   private startProcessing(): void {
+    console.log('[QUEUE] startProcessing() — interval:', this.CHECK_INTERVAL, 'ms');
     if (this.processingInterval) {
       clearInterval(this.processingInterval);
     }
@@ -49,6 +51,7 @@ class BroadcastQueueService {
    * Stop background processing
    */
   stopProcessing(): void {
+    console.log('[QUEUE] stopProcessing()');
     if (this.processingInterval) {
       clearInterval(this.processingInterval);
       this.processingInterval = null;
@@ -59,6 +62,7 @@ class BroadcastQueueService {
    * Add a broadcast to the queue
    */
   async queueBroadcast(message: string, isEmergency: boolean = false): Promise<string> {
+    console.log('[QUEUE] queueBroadcast() — emergency:', isEmergency, '| msgLen:', message.length, '| currentQueueSize:', this.queue.length);
     const broadcast: QueuedBroadcast = {
       id: generateUUID(),
       message,
@@ -112,6 +116,7 @@ class BroadcastQueueService {
       return;
     }
 
+    console.log('[QUEUE] processQueue() — queueSize:', this.queue.length, '| eligible:', eligible.length, '| neighbors:', activeNeighbors.length);
     this.isProcessing = true;
 
     try {
@@ -132,11 +137,11 @@ class BroadcastQueueService {
             broadcast.isEmergency
           );
 
-          console.log(`✅ Sent queued broadcast: ${broadcast.id}`);
+          console.log('[QUEUE] Sent queued broadcast:', broadcast.id);
           toRemove.push(broadcast.id);
 
         } catch (error) {
-          console.error(`❌ Failed to send queued broadcast ${broadcast.id}:`, error);
+          console.error('[QUEUE] Failed to send queued broadcast:', broadcast.id, error);
           
           // Increment attempt counter
           broadcast.attempts++;
@@ -146,11 +151,9 @@ class BroadcastQueueService {
             60_000 // cap at 1 minute
           );
           broadcast.nextAttemptAt = Date.now()+backoff;
-          console.error(
-            `❌ Failed broadcast ${broadcast.id}, retry in ${backoff}ms`
-          );
+          console.log('[QUEUE] Retry scheduled — id:', broadcast.id, '| attempt:', broadcast.attempts, '| backoff:', backoff, 'ms');
           if (broadcast.attempts >= broadcast.maxAttempts) {
-            console.log(`❌ Max attempts reached for broadcast ${broadcast.id}, removing from queue`);
+            console.log('[QUEUE] Max attempts reached — removing:', broadcast.id);
             toRemove.push(broadcast.id);
           }
         }
@@ -158,13 +161,14 @@ class BroadcastQueueService {
 
       // Remove sent or failed messages
       if (toRemove.length > 0) {
+        console.log('[QUEUE] Removing', toRemove.length, 'items from queue');
         this.queue = this.queue.filter(b => !toRemove.includes(b.id));
         await this.saveQueue();
         this.notifyListeners();
       }
 
     } catch (error) {
-      console.error('❌ Error processing queue:', error);
+      console.error('[QUEUE] Error processing queue:', error);
     } finally {
       this.isProcessing = false;
     }

@@ -10,14 +10,11 @@ import {
   PermissionsAndroid,
   Alert,
   Linking,
-  NativeEventEmitter,
-  NativeModules,
 } from 'react-native';
-import BleManager from 'react-native-ble-manager';
+import { State } from 'react-native-ble-plx';
 import { ERROR_MESSAGES } from '../constants';
 import { BLEPermissionsState } from '../types';
-
-const bleManagerEmitter = new NativeEventEmitter(NativeModules.BleManager);
+import { bleManager } from '../services/BLEService';
 
 export const useBlePermissions = () => {
   const [state, setState] = useState<BLEPermissionsState>({
@@ -30,22 +27,38 @@ export const useBlePermissions = () => {
   // Listen to Bluetooth state changes
   // -------------------------------------------------------------------------
   useEffect(() => {
-    BleManager.start({ showAlert: false });
-    const subscription = bleManagerEmitter.addListener(
-      'BleManagerDidUpdateState',
-      ({ state: bleState }) => {
-        setState((prev: BLEPermissionsState) => ({
-          ...prev,
-          bluetoothEnabled: bleState === 'on',
-          checking: false,
-        }));
-      }
-    );
+    let stateSubscription: any;
 
-    checkPermissions();
+    const initializeBluetooth = async () => {
+      try {
+        console.log('[PERM] initializeBluetooth() called');
+        // Subscribe to Bluetooth state changes
+        stateSubscription = bleManager.onStateChange((bleState: State) => {
+          console.log('[PERM] BLE state change event:', bleState);
+          setState((prev: BLEPermissionsState) => ({
+            ...prev,
+            bluetoothEnabled: bleState === State.PoweredOn,
+            checking: false,
+          }));
+        }, true); // true = emit current state immediately
+
+        await checkPermissions();
+      } catch (error) {
+        console.error('[PERM] Bluetooth initialization failed:', error);
+        setState({
+          granted: false,
+          checking: false,
+          bluetoothEnabled: false,
+        });
+      }
+    };
+
+    initializeBluetooth();
 
     return () => {
-      subscription.remove();
+      if (stateSubscription) {
+        stateSubscription.remove();
+      }
     };
   }, []);
 
@@ -54,30 +67,30 @@ export const useBlePermissions = () => {
   // -------------------------------------------------------------------------
   const checkPermissions = async () => {
     try {
+      console.log('[PERM] checkPermissions() called');
       setState((prev: BLEPermissionsState) => ({
         ...prev,
         checking: true,
       }));
 
+      let granted = true;
       if (Platform.OS === 'android') {
-        const granted = await requestAndroidPermissions();
-        await checkBluetoothState();
-
-        setState((prev: BLEPermissionsState) => ({
-          ...prev,
-          granted,
-        }));
-      } else {
-        // iOS: no runtime BLE permissions
-        await checkBluetoothState();
-
-        setState((prev: BLEPermissionsState) => ({
-          ...prev,
-          granted: true,
-        }));
+        granted = await requestAndroidPermissions();
       }
+
+      const enabled = await checkBluetoothState();
+      console.log('[PERM] checkPermissions result — granted:', granted, '| btEnabled:', enabled);
+
+      // Both values set together — guarantees the useEffect in
+      // NearbyPeersScreen sees granted && bluetoothEnabled at the same time.
+      setState((prev: BLEPermissionsState) => ({
+        ...prev,
+        granted,
+        bluetoothEnabled: enabled,
+        checking: false,
+      }));
     } catch (error) {
-      console.error('❌ Permission check failed:', error);
+      console.error('[PERM] Permission check failed:', error);
       setState({
         granted: false,
         checking: false,
@@ -94,6 +107,7 @@ export const useBlePermissions = () => {
 
     try {
       const apiLevel = Platform.Version as number;
+      console.log('[PERM] requestAndroidPermissions() — API level:', apiLevel);
 
       if (apiLevel >= 31) {
         const permissions = [
@@ -104,12 +118,14 @@ export const useBlePermissions = () => {
         ];
 
         const results = await PermissionsAndroid.requestMultiple(permissions);
+        console.log('[PERM] API 31+ permission results:', JSON.stringify(results));
 
         const allGranted = Object.values(results).every(
           status => status === PermissionsAndroid.RESULTS.GRANTED
         );
 
         if (!allGranted) {
+          console.log('[PERM] Some permissions denied (API 31+)');
           showPermissionDeniedAlert();
         }
 
@@ -123,12 +139,14 @@ export const useBlePermissions = () => {
         ];
 
         const results = await PermissionsAndroid.requestMultiple(permissions);
+        console.log('[PERM] API 23+ permission results:', JSON.stringify(results));
 
         const allGranted = Object.values(results).every(
           status => status === PermissionsAndroid.RESULTS.GRANTED
         );
 
         if (!allGranted) {
+          console.log('[PERM] Some permissions denied (API 23+)');
           showPermissionDeniedAlert();
         }
 
@@ -137,7 +155,7 @@ export const useBlePermissions = () => {
 
       return true;
     } catch (error) {
-      console.error('❌ Android permission request failed:', error);
+      console.error('[PERM] Android permission request failed:', error);
       return false;
     }
   };
@@ -147,10 +165,17 @@ export const useBlePermissions = () => {
   // -------------------------------------------------------------------------
   const checkBluetoothState = async (): Promise<boolean> => {
     try {
-      await BleManager.checkState(); // triggers BleManagerDidUpdateState
-      return true;
+      const bleState = await bleManager.state();
+      const enabled = bleState === State.PoweredOn;
+      console.log('[PERM] checkBluetoothState() — state:', bleState, '| enabled:', enabled);
+      setState((prev: BLEPermissionsState) => ({
+        ...prev,
+        bluetoothEnabled: enabled,
+        checking: false,
+      }));
+      return enabled;
     } catch (error) {
-      console.error('❌ Bluetooth state check failed:', error);
+      console.error('[PERM] Bluetooth state check failed:', error);
       return false;
     }
   };
@@ -159,9 +184,10 @@ export const useBlePermissions = () => {
   // Enable Bluetooth
   // -------------------------------------------------------------------------
   const enableBluetooth = async (): Promise<boolean> => {
+    console.log('[PERM] enableBluetooth() called');
     if (Platform.OS === 'android') {
       try {
-        await BleManager.enableBluetooth();
+        await bleManager.enable();
         setState((prev: BLEPermissionsState) => ({
           ...prev,
           bluetoothEnabled: true,
@@ -208,6 +234,7 @@ export const useBlePermissions = () => {
   // -------------------------------------------------------------------------
   // Exposed API
   // -------------------------------------------------------------------------
+  console.log('[PERM] useBlePermissions state:', JSON.stringify({ granted: state.granted, bluetoothEnabled: state.bluetoothEnabled, checking: state.checking }));
   return {
     ...state,
     ready,

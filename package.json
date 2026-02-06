@@ -13,10 +13,10 @@
   "dependencies": {
     "@react-native-async-storage/async-storage": "^2.2.0",
     "@react-native/new-app-screen": "0.83.1",
+    "buffer": "^6.0.3",
     "expo": "^54.0.31",
     "react": "19.2.0",
     "react-native": "0.83.1",
-    "react-native-ble-manager": "^12.4.4",
     "react-native-ble-plx": "^3.5.0",
     "react-native-safe-area-context": "^5.5.2",
     "react-native-sqlite-storage": "^6.0.1",

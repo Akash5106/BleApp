@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(adb logcat:*)",
+      "Bash(adb shell:*)",
+      "Bash(node -e \"require\\(''expo/scripts/resolveAppEntry''\\)\" . android absolute)",
+      "Bash(npx react-native bundle:*)",
+      "Bash(./gradlew clean:*)",
+      "Bash(netstat:*)",
+      "Bash(findstr:*)",
+      "Bash(taskkill:*)",
+      "Bash(cmd /c \"taskkill /PID 35012 /F\")",
+      "Bash(npx tsc:*)"
+    ]
+  }
+}

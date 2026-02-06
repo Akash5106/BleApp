@@ -28,8 +28,8 @@ export const MESH_CONFIG = {
   ADAPTIVE_TTL_THRESHOLD: 3,            // Neighbor count for adaptation
   
   // Scanning settings
-  SCAN_DURATION: 12000,                  // 12 seconds
-  SCAN_ALLOW_DUPLICATES: true,
+  SCAN_DURATION: 10000,                  // 10 seconds
+  SCAN_ALLOW_DUPLICATES: false,          // CRITICAL: false prevents JS bridge overload
   SCAN_WINDOW: 4000,
   ADVERTISE_WINDOW: 2000,
   

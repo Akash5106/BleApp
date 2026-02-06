@@ -18,11 +18,10 @@ import {
   TouchableOpacity,
   StyleSheet,
   Switch,
-  SafeAreaView,
   KeyboardAvoidingView,
   Platform,
 } from 'react-native';
-
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { BroadcastCard } from '../components/BroadcastCard';
 import { EmptyState } from '../components/EmptyState';
 import { Loading } from '../components/Loading';
@@ -62,9 +61,11 @@ export const BroadcastScreen: React.FC = () => {
   const loadBroadcasts = useCallback(
     async (showLoader = false) => {
       try {
+        console.log('[BCAST] loadBroadcasts() — showLoader:', showLoader);
         if (showLoader) setLoading(true);
 
         const msgs = await DatabaseService.getBroadcastMessages();
+        console.log('[BCAST] Loaded', msgs.length, 'broadcasts from DB');
 
         const mapped: MeshMessage[] = msgs.map(m => ({
           id: m.msg_id,
@@ -83,7 +84,7 @@ export const BroadcastScreen: React.FC = () => {
 
         setBroadcasts(mapped);
       } catch (error) {
-        console.error('❌ Failed to load broadcasts:', error);
+        console.error('[BCAST] Failed to load broadcasts:', error);
       } finally {
         if (showLoader) setLoading(false);
       }
@@ -95,11 +96,18 @@ export const BroadcastScreen: React.FC = () => {
   // INITIAL LOAD + QUEUE COUNT SUBSCRIPTION
   // =========================================================================
   useEffect(() => {
+    console.log('[BCAST] Initial load + queue subscription setup');
     loadBroadcasts(true);
 
-    BroadcastQueueService.getQueueSize().then(setQueuedCount);
+    BroadcastQueueService.getQueueSize().then(size => {
+      console.log('[BCAST] Initial queue size:', size);
+      setQueuedCount(size);
+    });
     const unsubscribeQueue =
-      BroadcastQueueService.onQueueChange(setQueuedCount);
+      BroadcastQueueService.onQueueChange(count => {
+        console.log('[BCAST] Queue count changed:', count);
+        setQueuedCount(count);
+      });
 
     return unsubscribeQueue;
   }, [loadBroadcasts]);
@@ -125,7 +133,9 @@ export const BroadcastScreen: React.FC = () => {
   // FLUSH QUEUE WHEN ACTIVE NEIGHBORS APPEAR (SAFE)
   // =========================================================================
   useEffect(() => {
+    console.log('[BCAST] Neighbor change — hasActiveNeighbors:', hasActiveNeighbors, '| queueFlushed:', queueFlushedRef.current);
     if (hasActiveNeighbors && !queueFlushedRef.current) {
+      console.log('[BCAST] Active neighbors appeared — flushing queue');
       queueFlushedRef.current = true;
       BroadcastQueueService.processQueue();
     }
@@ -142,13 +152,16 @@ export const BroadcastScreen: React.FC = () => {
     if (!inputText.trim() || sending) return;
 
     const messageText = inputText.trim();
+    console.log('[BCAST] handleSend() — text:', messageText.substring(0, 30), '| emergency:', isEmergency, '| hasNeighbors:', hasActiveNeighbors);
     setInputText('');
     setSending(true);
 
     try {
       if (hasActiveNeighbors) {
+        console.log('[BCAST] Sending broadcast directly');
         await sendBroadcast(messageText, isEmergency);
       } else {
+        console.log('[BCAST] No neighbors — queuing broadcast');
         await BroadcastQueueService.queueBroadcast(
           messageText,
           isEmergency
@@ -157,8 +170,9 @@ export const BroadcastScreen: React.FC = () => {
 
       setIsEmergency(false);
       await loadBroadcasts();
+      console.log('[BCAST] handleSend() complete');
     } catch (error) {
-      console.error('❌ Failed to send broadcast:', error);
+      console.error('[BCAST] Failed to send broadcast:', error);
       setInputText(messageText);
     } finally {
       setSending(false);

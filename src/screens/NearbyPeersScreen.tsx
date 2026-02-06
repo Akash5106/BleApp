@@ -11,9 +11,9 @@ import {
   FlatList,
   StyleSheet,
   RefreshControl,
-  SafeAreaView,
   TouchableOpacity,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { PeerCard } from '../components/PeerCard';
 import { EmptyState } from '../components/EmptyState';
@@ -49,8 +49,11 @@ export const NearbyPeersScreen: React.FC<NearbyPeersScreenProps> = ({
   // =========================================================================
   // AUTO SCAN WHEN READY
   // =========================================================================
+  console.log('[PEERS] render — granted:', granted, '| btEnabled:', bluetoothEnabled, '| activeNeighbors:', activeNeighbors.length);
   useEffect(() => {
+    console.log('[PEERS] useEffect — granted:', granted, '| btEnabled:', bluetoothEnabled);
     if (granted && bluetoothEnabled) {
+      console.log('[PEERS] Conditions met — triggering startScanning()');
       startScanning();
     }
 
@@ -65,20 +68,26 @@ export const NearbyPeersScreen: React.FC<NearbyPeersScreenProps> = ({
   // START SCANNING (GUARDED)
   // =========================================================================
   const startScanning = async () => {
-    if (scanningRef.current) return;
+    if (scanningRef.current) {
+      console.log('[PEERS] startScanning() skipped — already scanning');
+      return;
+    }
 
     try {
+      console.log('[PEERS] startScanning() — initiating BLE scan');
       scanningRef.current = true;
       setIsScanning(true);
 
       await BLEService.startScan();
+      console.log('[PEERS] BLEService.startScan() resolved');
 
       scanTimeoutRef.current = setTimeout(() => {
+        console.log('[PEERS] Scan timeout reached — resetting scan state');
         scanningRef.current = false;
         setIsScanning(false);
       }, MESH_CONFIG.SCAN_DURATION + 500);
     } catch (error) {
-      console.error('❌ Failed to start scanning:', error);
+      console.error('[PEERS] Failed to start scanning:', error);
       scanningRef.current = false;
       setIsScanning(false);
     }
@@ -88,6 +97,7 @@ export const NearbyPeersScreen: React.FC<NearbyPeersScreenProps> = ({
   // REFRESH
   // =========================================================================
   const handleRefresh = async () => {
+    console.log('[PEERS] handleRefresh() — isScanning:', isScanning);
     if (isScanning) return;
 
     setIsRefreshing(true);
@@ -99,6 +109,7 @@ export const NearbyPeersScreen: React.FC<NearbyPeersScreenProps> = ({
   // PEER SELECT (ID-ONLY, SAFE)
   // =========================================================================
   const handlePeerPress = (peerId: string) => {
+    console.log('[PEERS] handlePeerPress() — peerId:', peerId);
     // peerName is not implemented anywhere → use peerId
     onSelectPeer(peerId, peerId);
   };

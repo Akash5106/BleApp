@@ -24,6 +24,7 @@ import MeshProtocolService from './src/services/MeshProtocolService';
 import BLEService from './src/services/BLEService';
 import StorageService from './src/services/StorageService';
 import BroadcastQueueService from './src/services/BroadcastQueueService';
+import ChatQueueService from './src/services/ChatQueueService';
 
 type Screen = 'peers' | 'chat' | 'broadcast';
 
@@ -54,6 +55,9 @@ const App: React.FC = () => {
     return () => {
       mountedRef.current = false;
       queueUnsubscribeRef.current?.();
+      BLEService.stopPeriodicScanning();
+      ChatQueueService.stopProcessing();
+      BroadcastQueueService.stopProcessing();
     };
   }, []);
 
@@ -65,6 +69,7 @@ const App: React.FC = () => {
   async (): Promise<boolean> => {
     try {
       const apiLevel = Platform.Version as number;
+      console.log('[APP] requestAndroidPermissions() — API level:', apiLevel);
 
       if (apiLevel >= 31) {
         const granted = await PermissionsAndroid.requestMultiple([
@@ -73,6 +78,7 @@ const App: React.FC = () => {
           PermissionsAndroid.PERMISSIONS.BLUETOOTH_ADVERTISE,
           PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
         ]);
+        console.log('[APP] Permission results (API 31+):', JSON.stringify(granted));
 
         return Object.values(granted).every(
           v => v === PermissionsAndroid.RESULTS.GRANTED
@@ -82,12 +88,14 @@ const App: React.FC = () => {
           PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
           PermissionsAndroid.PERMISSIONS.ACCESS_COARSE_LOCATION,
         ]);
+        console.log('[APP] Permission results (API <31):', JSON.stringify(granted));
 
         return Object.values(granted).every(
           v => v === PermissionsAndroid.RESULTS.GRANTED
         );
       }
-    } catch {
+    } catch (e) {
+      console.error('[APP] Permission request threw:', e);
       return false;
     }
   },
@@ -103,40 +111,69 @@ const App: React.FC = () => {
     initializingRef.current = true;
 
     try {
-      console.log('🚀 Starting app initialization...');
+      console.log('[APP] ====== STARTING APP INITIALIZATION ======');
 
       // ---------------- Permissions ----------------
       if (Platform.OS === 'android') {
+        console.log('[APP] [1/8] Requesting Android permissions...');
         const granted = await requestAndroidPermissions();
+        console.log('[APP] [1/8] Permissions granted:', granted);
         if (!granted) {
+          console.error('[APP] [1/8] PERMISSIONS DENIED — aborting init');
           setInitError('Permissions denied. Please grant all permissions.');
           return;
         }
+      } else {
+        console.log('[APP] [1/8] Skipping permissions (not Android)');
       }
 
       // ---------------- Database ----------------
+      console.log('[APP] [2/8] Initializing DatabaseService...');
       await DatabaseService.init();
+      console.log('[APP] [2/8] DatabaseService READY');
 
       // ---------------- Storage ----------------
+      console.log('[APP] [3/8] Loading user settings...');
       const settings = await StorageService.initUserSettings();
-      if (!mountedRef.current) return;
-
+      if (!mountedRef.current) {
+        console.log('[APP] Component unmounted during init — aborting');
+        return;
+      }
+      console.log('[APP] [3/8] Settings loaded — deviceId:', settings.device_id, '| username:', settings.username);
       setDeviceId(settings.device_id);
 
       // ---------------- BLE ----------------
+      console.log('[APP] [4/8] Initializing BLEService...');
       await BLEService.init();
+      console.log('[APP] [4/8] BLEService READY');
 
       // ---------------- Mesh ----------------
+      console.log('[APP] [5/8] Initializing MeshProtocolService...');
       await MeshProtocolService.init(settings.device_id);
+      console.log('[APP] [5/8] MeshProtocolService READY');
 
       // ---------------- Advertising ----------------
+      console.log('[APP] [5b] Starting BLE advertising...');
       await BLEService.startAdvertising(
         settings.device_id,
         settings.username || `Mesh-${settings.device_id}`
       );
+      console.log('[APP] [5b] BLE advertising STARTED');
 
       // ---------------- Broadcast Queue ----------------
+      console.log('[APP] [6/8] Initializing BroadcastQueueService...');
       await BroadcastQueueService.init();
+      console.log('[APP] [6/8] BroadcastQueueService READY');
+
+      // ---------------- Chat Queue ----------------
+      console.log('[APP] [7/8] Initializing ChatQueueService...');
+      await ChatQueueService.init();
+      console.log('[APP] [7/8] ChatQueueService READY');
+
+      // ---------------- Periodic Scanning ----------------
+      console.log('[APP] [8/8] Starting periodic BLE scanning...');
+      BLEService.startPeriodicScanning();
+      console.log('[APP] [8/8] Periodic scanning STARTED');
 
       // Remove old listener if retrying
       queueUnsubscribeRef.current?.();
@@ -144,16 +181,17 @@ const App: React.FC = () => {
       queueUnsubscribeRef.current =
         BroadcastQueueService.onQueueChange((count) => {
           if (mountedRef.current) {
+            console.log('[APP] Queue count changed:', count);
             setQueuedCount(count);
           }
         });
 
       if (mountedRef.current) {
         setIsInitialized(true);
-        console.log('🎉 App initialization complete');
+        console.log('[APP] ====== APP INITIALIZATION COMPLETE ======');
       }
     } catch (error) {
-      console.error('❌ Initialization failed:', error);
+      console.error('[APP] ====== INITIALIZATION FAILED ======', error);
       if (mountedRef.current) {
         setInitError(
           error instanceof Error
@@ -175,11 +213,13 @@ const App: React.FC = () => {
   // ============================================================================
 
   const handleSelectPeer = (peerId: string, peerName?: string) => {
+    console.log('[APP] Navigate to chat — peerId:', peerId, '| peerName:', peerName);
     setChatInfo({ peerId, peerName: peerName || peerId });
     setCurrentScreen('chat');
   };
 
   const handleBackFromChat = () => {
+    console.log('[APP] Navigate back to peers');
     setChatInfo(null);
     setCurrentScreen('peers');
   };
