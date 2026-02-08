@@ -148,15 +148,19 @@ const App: React.FC = () => {
       console.log('[APP] [4/8] BLEService READY');
 
       // ---------------- Mesh ----------------
-      console.log('[APP] [5/8] Initializing MeshProtocolService...');
-      await MeshProtocolService.init(settings.device_id);
+      // CRITICAL: MeshProtocolService identity MUST match the BLE advertising name.
+      // Other devices discover us by advertising name, so packet src_id/dest_id
+      // must use the same value for routing to work.
+      const advertisingName = settings.username || `Mesh-${settings.device_id}`;
+      console.log('[APP] [5/8] Initializing MeshProtocolService with advertisingName:', advertisingName);
+      await MeshProtocolService.init(advertisingName);
       console.log('[APP] [5/8] MeshProtocolService READY');
 
       // ---------------- Advertising ----------------
       console.log('[APP] [5b] Starting BLE advertising...');
       await BLEService.startAdvertising(
         settings.device_id,
-        settings.username || `Mesh-${settings.device_id}`
+        advertisingName
       );
       console.log('[APP] [5b] BLE advertising STARTED');
 

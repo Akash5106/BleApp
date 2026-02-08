@@ -76,7 +76,7 @@ export const BroadcastScreen: React.FC = () => {
           isRead: true,
           status: MessageStatus.DELIVERED,
           type: MessageType.BROADCAST,
-          ttl: 0,
+          ttl: m.ttl ?? 0,
           isEmergency: !!(
             m.flags && (m.flags & MessageFlags.EMERGENCY)
           ),
@@ -188,6 +188,7 @@ export const BroadcastScreen: React.FC = () => {
       senderId={item.senderId}
       timestamp={item.timestamp}
       isEmergency={item.isEmergency === true}
+      ttl={item.ttl}
     />
   );
 

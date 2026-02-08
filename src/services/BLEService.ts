@@ -174,7 +174,8 @@ class BLEService {
       }
 
       this.isScanning = true;
-      this.discoveredDevices.clear();
+      // Don't clear discoveredDevices — keep pool of known peers across scans
+      // Entries are updated each scan; stale ones fail gracefully on connect
 
       // Scan for ALL devices first, then filter in onDeviceDiscovered
       // This is more reliable than hardware-level UUID filtering which can miss devices
@@ -347,8 +348,8 @@ class BLEService {
   private connectionQueue: string[] = [];
   private isProcessingConnectionQueue = false;
 
-  // TEMPORARY: Disable auto-connect to isolate crash cause
-  // Set to true to enable auto-connect, false to disable
+  // Auto-connect disabled - causes BLE stack conflicts
+  // Connections are made on-demand when sending packets
   private readonly AUTO_CONNECT_ENABLED = false;
 
   // Cleanup stale entries from recentlyProcessedByName
@@ -601,15 +602,20 @@ class BLEService {
   }
 
   // =========================================================================
-  // PACKET SENDING — write to connected peers' GATT characteristics
+  // PACKET SENDING — connect on-demand and write to peers
   // =========================================================================
   async advertisePacket(packet: MeshPacket): Promise<void> {
     try {
       const payload = JSON.stringify(packet);
       const base64Value = Buffer.from(payload).toString('base64');
 
-      const deviceIds = Array.from(this.connectedDevices);
+      // If no connections, try to connect to discovered devices first
+      if (this.connectedDevices.size === 0 && this.discoveredDevices.size > 0) {
+        console.log('[BLE] No connections, attempting on-demand connect to', this.discoveredDevices.size, 'discovered devices');
+        await this.connectToDiscoveredDevices();
+      }
 
+      const deviceIds = Array.from(this.connectedDevices);
       console.log('[BLE] advertisePacket() — msg_id:', packet.msg_id, '| connectedPeers:', deviceIds.length, '| payloadLen:', payload.length);
 
       if (deviceIds.length === 0) {
@@ -642,6 +648,55 @@ class BLEService {
       }
     } catch (error) {
       console.error('[BLE] Failed to send packet:', error);
+    }
+  }
+
+  // Connect to discovered mesh devices (on-demand, not during scan)
+  private async connectToDiscoveredDevices(): Promise<void> {
+    // Don't connect while scanning - causes BLE conflicts
+    if (this.isScanning) {
+      console.log('[BLE] Skipping connect - scan in progress');
+      return;
+    }
+
+    const discovered = Array.from(this.discoveredDevices.values());
+    console.log('[BLE] connectToDiscoveredDevices() — pool size:', discovered.length);
+
+    for (const device of discovered.slice(0, 3)) { // Limit to 3 connections
+      if (this.connectedDevices.has(device.id)) continue;
+
+      try {
+        // Mark as connecting early to prevent duplicate attempts
+        this.connectedDevices.add(device.id);
+
+        // Use connectToDevice() directly — bleManager.devices() only returns
+        // cached objects which expire after scan ends, causing silent failures
+        const connected = await bleManager.connectToDevice(device.id, { timeout: 10000 });
+        console.log('[BLE] On-demand connected to:', device.id);
+
+        // Negotiate higher MTU for larger packets (Android only)
+        if (Platform.OS === 'android') {
+          try {
+            await connected.requestMTU(512);
+          } catch (mtuError) {
+            console.warn('[BLE] MTU negotiation failed:', mtuError);
+          }
+        }
+
+        try {
+          await connected.discoverAllServicesAndCharacteristics();
+        } catch (discoverError) {
+          console.warn('[BLE] Service discovery failed:', discoverError);
+        }
+
+        connected.onDisconnected(() => {
+          this.connectedDevices.delete(device.id);
+          console.log('[BLE] On-demand peer disconnected:', device.id);
+        });
+      } catch (err) {
+        this.connectedDevices.delete(device.id);
+        console.warn('[BLE] On-demand connect failed:', device.id, err);
+      }
     }
   }
 

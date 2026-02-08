@@ -88,8 +88,9 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
         console.log('[CHAT] loadMessages() — peerId:', peerId, '| showLoader:', showLoader);
         if (showLoader) setLoading(true);
 
+        const localDeviceId = MeshProtocolService.getDeviceId();
         const msgs = await DatabaseService.getChatMessages(
-          peerId,
+          localDeviceId,
           peerId
         );
         setMessages(msgs);

@@ -13,6 +13,7 @@ interface BroadcastCardProps {
   senderId: string;
   timestamp: number;
   isEmergency: boolean;
+  ttl?: number;
 }
 
 export const BroadcastCard: React.FC<BroadcastCardProps> = ({
@@ -20,6 +21,7 @@ export const BroadcastCard: React.FC<BroadcastCardProps> = ({
   senderId,
   timestamp,
   isEmergency,
+  ttl,
 }) => {
   const displaySender =senderId.length > 8 ? senderId.slice(0, 8) + '…' : senderId;
   const formatTimestamp = React.useCallback(
@@ -68,9 +70,14 @@ export const BroadcastCard: React.FC<BroadcastCardProps> = ({
         {message}
       </Text>
 
-      <Text style={styles.timestamp}>
-        {formatTimestamp(timestamp)}
-      </Text>
+      <View style={styles.footer}>
+        <Text style={styles.timestamp}>
+          {formatTimestamp(timestamp)}
+        </Text>
+        {ttl !== undefined && (
+          <Text style={styles.ttlBadge}>TTL: {ttl}</Text>
+        )}
+      </View>
     </View>
   );
 };
@@ -133,8 +140,23 @@ const styles = StyleSheet.create({
     color: '#000000',
   },
 
+  footer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+
   timestamp: {
     fontSize: 12,
     color: COLORS.textLighter,
+  },
+
+  ttlBadge: {
+    fontSize: 11,
+    color: COLORS.textLighter,
+    backgroundColor: COLORS.background,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 8,
   },
 });

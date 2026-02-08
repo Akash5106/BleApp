@@ -110,6 +110,7 @@ class MeshProtocolService {
       payload: packet.payload,
       timestamp: packet.timestamp!,
       ui_state: MessageState.SENDING,
+      ttl: packet.ttl,
     };
 
     await DatabaseService.saveMessage(storedMessage);
@@ -200,7 +201,7 @@ class MeshProtocolService {
   }
 
   private async deliverToUI(packet: MeshPacket): Promise<void> {
-    console.log('[MESH] deliverToUI() — msg_id:', packet.msg_id, '| payload:', packet.payload.substring(0, 50), '| listeners:', this.messageListeners.length);
+    console.log('[MESH] deliverToUI() — msg_id:', packet.msg_id, '| payload:', packet.payload.substring(0, 50), '| ttl:', packet.ttl, '| listeners:', this.messageListeners.length);
     const storedMessage: StoredMessage = {
       msg_id: packet.msg_id,
       src_id: packet.src_id,
@@ -209,6 +210,7 @@ class MeshProtocolService {
       payload: packet.payload,
       timestamp: packet.timestamp || Date.now(),
       ui_state: MessageState.CONFIRMED,
+      ttl: packet.ttl,
     };
 
     await DatabaseService.saveMessage(storedMessage);
@@ -363,6 +365,13 @@ class MeshProtocolService {
         this.neighborNotifyPending = false;
       }
     }, this.NEIGHBOR_NOTIFY_THROTTLE);
+  }
+
+  // =========================================================================
+  // GETTERS
+  // =========================================================================
+  getDeviceId(): string {
+    return this.deviceId;
   }
 
   // =========================================================================

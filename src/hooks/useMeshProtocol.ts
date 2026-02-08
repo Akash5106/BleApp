@@ -72,7 +72,7 @@ export const useMeshProtocol = () => {
             message.dest_id === MESH_CONFIG.BROADCAST_ADDRESS
               ? MessageType.BROADCAST
               : MessageType.CHAT,
-          ttl: 0, // ✅ REQUIRED by MeshMessage type
+          ttl: message.ttl ?? 0,
         };
 
         setMessages(prev => {

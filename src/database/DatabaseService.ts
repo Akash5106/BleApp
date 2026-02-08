@@ -47,9 +47,17 @@ class DatabaseService {
       flags INTEGER NOT NULL,
       payload TEXT NOT NULL,
       timestamp INTEGER NOT NULL,
-      ui_state TEXT NOT NULL
+      ui_state TEXT NOT NULL,
+      ttl INTEGER DEFAULT 0
     )
   `);
+
+  // Add ttl column if it doesn't exist (migration for existing DBs)
+  await this.db.executeSql(`
+    ALTER TABLE messages ADD COLUMN ttl INTEGER DEFAULT 0
+  `).catch(() => {
+    // Column already exists, ignore error
+  });
 
   await this.db.executeSql(
     `CREATE INDEX IF NOT EXISTS idx_timestamp ON messages(timestamp)`
@@ -70,12 +78,12 @@ class DatabaseService {
   async saveMessage(message: StoredMessage): Promise<void> {
     const query = `
       INSERT OR REPLACE INTO messages
-      (msg_id, src_id, dest_id, flags, payload, timestamp, ui_state)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
+      (msg_id, src_id, dest_id, flags, payload, timestamp, ui_state, ttl)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `;
 
     try {
-      console.log('[DB] saveMessage() — msg_id:', message.msg_id, '| src:', message.src_id, '| dest:', message.dest_id);
+      console.log('[DB] saveMessage() — msg_id:', message.msg_id, '| src:', message.src_id, '| dest:', message.dest_id, '| ttl:', message.ttl);
       await this.db?.executeSql(query, [
         message.msg_id,
         message.src_id,
@@ -84,6 +92,7 @@ class DatabaseService {
         message.payload,
         message.timestamp,
         message.ui_state,
+        message.ttl ?? 0,
       ]);
       console.log('[DB] Message saved:', message.msg_id);
     } catch (error) {

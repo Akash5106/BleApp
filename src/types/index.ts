@@ -56,6 +56,7 @@ export interface StoredMessage {
   payload: string;
   timestamp: number;
   ui_state: MessageState;
+  ttl?: number;
 }
 
 export interface SeenMessageEntry {
