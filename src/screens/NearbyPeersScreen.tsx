@@ -47,25 +47,24 @@ export const NearbyPeersScreen: React.FC<NearbyPeersScreenProps> = ({
   const activeNeighbors = getActiveNeighbors();
 
   // =========================================================================
-  // AUTO SCAN WHEN READY
+  // CLEANUP ON UNMOUNT
   // =========================================================================
   console.log('[PEERS] render — granted:', granted, '| btEnabled:', bluetoothEnabled, '| activeNeighbors:', activeNeighbors.length);
+  
   useEffect(() => {
-    console.log('[PEERS] useEffect — granted:', granted, '| btEnabled:', bluetoothEnabled);
-    if (granted && bluetoothEnabled) {
-      console.log('[PEERS] Conditions met — triggering startScanning()');
-      startScanning();
-    }
-
+    console.log('[PEERS] Component mounted — relying on App.tsx periodic scanning');
+    
+    // Only cleanup timeout on unmount
     return () => {
+      console.log('[PEERS] Component unmounting — cleaning up');
       if (scanTimeoutRef.current) {
         clearTimeout(scanTimeoutRef.current);
       }
     };
-  }, [granted, bluetoothEnabled]);
+  }, []); // Empty deps - only run on mount/unmount
 
   // =========================================================================
-  // START SCANNING (GUARDED)
+  // START SCANNING (MANUAL ONLY - guarded)
   // =========================================================================
   const startScanning = async () => {
     if (scanningRef.current) {
@@ -73,8 +72,13 @@ export const NearbyPeersScreen: React.FC<NearbyPeersScreenProps> = ({
       return;
     }
 
+    if (!granted || !bluetoothEnabled) {
+      console.log('[PEERS] startScanning() skipped — permissions not ready');
+      return;
+    }
+
     try {
-      console.log('[PEERS] startScanning() — initiating BLE scan');
+      console.log('[PEERS] startScanning() — manual scan triggered');
       scanningRef.current = true;
       setIsScanning(true);
 
